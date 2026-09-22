@@ -68,7 +68,12 @@ namespace
             if (it->is_symlink()) { if (it->is_directory()) it.disable_recursion_pending(); continue; }
             if (it->is_directory() && (it->path().filename() == "Editor" || it->path().filename() == "bin" || it->path().filename() == "obj"))
             { it.disable_recursion_pending(); continue; }
-            if (it->is_regular_file() && it->path().extension() == ".cs") sources.emplace(it->path().string(), Read(it->path()));
+            if (it->is_regular_file() && it->path().extension() == ".cs")
+            {
+                sources.emplace(it->path().string(), Read(it->path()));
+                const auto meta = it->path().string() + ".meta";
+                if (std::filesystem::exists(meta)) sources.emplace(meta, Read(meta));
+            }
         }
         if (!sources.empty())
         {
@@ -81,7 +86,8 @@ namespace
         if(!sources.empty()) {
             const auto ide=cache.parent_path()/"IDE";std::filesystem::create_directories(ide);
             std::string project="<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><EnableDefaultCompileItems>false</EnableDefaultCompileItems><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup><ItemGroup>";
-            for(auto& [path,_]:sources)project+="<Compile Include=\""+Xml(path)+"\" />";
+            for(auto& [path,_]:sources)project += (std::filesystem::path(path).extension()==".meta" ? "<AdditionalFiles Include=\"" : "<Compile Include=\"") + Xml(path) + "\" />";
+            project+="<Analyzer Include=\""+Xml(CANIS_MANAGED_HOST_DIR "/Canis.ScriptMetadata.dll")+"\" />";
             project+="<Reference Include=\"Canis.Core\"><HintPath>"+Xml(CANIS_MANAGED_HOST_DIR "/Canis.Core.dll")+"</HintPath></Reference></ItemGroup></Project>";
             if(!std::filesystem::exists(ide/"Game.Runtime.csproj") || Read(ide/"Game.Runtime.csproj")!=project)Write(ide/"Game.Runtime.csproj",project);
             Write(ide/"Canis.Game.slnx","<Solution><Project Path=\"Game.Runtime.csproj\" /></Solution>");
@@ -99,10 +105,11 @@ namespace
                 "<AssemblyName>Game.Runtime</AssemblyName><EnableDefaultCompileItems>false</EnableDefaultCompileItems>"
                 "<ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><DebugType>portable</DebugType>"
                 "</PropertyGroup><ItemGroup><Reference Include=\"Canis.Core\"><HintPath>" + Xml(CANIS_MANAGED_HOST_DIR "/Canis.Core.dll") +
-                "</HintPath><Private>false</Private></Reference>";
+                "</HintPath><Private>false</Private></Reference><Analyzer Include=\"" + Xml(CANIS_MANAGED_HOST_DIR "/Canis.ScriptMetadata.dll") + "\" />";
             int index = 0;
             for (const auto& [path, source] : result.sources)
             {
+                if (std::filesystem::path(path).extension() == ".meta") continue;
                 // Compile immutable snapshots, but diagnostics/PDBs point at the real asset.
                 std::string diagnosticPath=path;
                 if(const char* root=SDL_getenv("CANIS_MANAGED_SOURCE_ROOT")) {
@@ -114,6 +121,11 @@ namespace
                 const auto file = "Script" + std::to_string(index++) + ".cs";
                 Write(directory / file, "#line 1 \"" + escaped + "\"\n" + source);
                 project += "<Compile Include=\"" + file + "\" />";
+                if (const auto meta = result.sources.find(path + ".meta"); meta != result.sources.end())
+                {
+                    Write(directory / (file + ".meta"), meta->second);
+                    project += "<AdditionalFiles Include=\"" + file + ".meta\" />";
+                }
             }
             project += "</ItemGroup></Project>";
             Write(directory / "Game.Runtime.csproj", project);

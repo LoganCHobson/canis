@@ -53,10 +53,12 @@ int main(){
         auto encoded=app.scene.EncodeEntity(*entities[0]);
         Check(encoded["Canis::ManagedScripts"][0]["fields"]["count"].as<int>()==13,"Serialized field lost");
         auto trace=root/"trace.txt",file=root/"assets/Probe.cs";
+        // The old textual attachment above must still load through the metadata alias.
+        Write(file.string()+".meta", "FileType: CSHARP\nUUID: 16003035088673311249\nScriptAlias: test.probe\nname: Probe\nextension: cs\nsize: 0\nmodified: 0\n");
         auto source=[&](std::string name,std::string field){return std::string(R"(using Canis;using System.IO;
 [ScriptId("test.data")] public class Counter:Component { public int Value=5; }
 [ScriptId("test.fault")] public class Fault:ScriptableEntity { public override void Update(float dt) { throw new Exception("EXPECTED_CALLBACK_FAILURE"); } }
-[ScriptId("test.probe")] public class )")+name+R"(:ScriptableEntity {
+public class )")+name+R"(:ScriptableEntity {
 [SerializeField,FormerlySerializedAs("count")] private int )"+field+R"(=7;
 public Entity? Target;
 [Header("References"),Tooltip("Spawn template")] public PrefabAsset? Prefab;
@@ -130,6 +132,9 @@ public override void OnDestroy()=>Emit("destroy");
             runtime.Tick(true,false,.01f);Check(Read(trace).find("awake:13:Target")!=std::string::npos,"Attachment/serialized references not restored before Awake");
             Check(Read(trace).find("wrapper-invalid")!=std::string::npos,"Native component lifetime guard not exercised");
             Check(Read(trace).find("gameplay-apis")!=std::string::npos,"Typed references, parenting, prefab or pooling failed");
+            Check(app.scene.EncodeEntity(*entities[0])["Canis::ManagedScripts"][0]["type"].as<std::string>()=="16003035088673311249","Metadata UUID was not used when saving the old attachment");
+            AssetManager::GetMetaFile(file.string())->Save();
+            Check(YAML::LoadFile(file.string()+".meta")["ScriptAlias"].as<std::string>()=="test.probe","Saving metadata dropped the legacy script alias");
             auto& attachments=entities[0]->GetComponent<ManagedComponents>();
             attachments.items[1]->fields["Value"]=9;runtime.Tick(true,false,.01f);
             Check(Read(trace).find("data:9")!=std::string::npos,"Runtime-added data component ignored Inspector edit");

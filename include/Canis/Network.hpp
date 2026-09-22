@@ -206,6 +206,10 @@ namespace Canis
         float m_matchRemainingSeconds = 0.0f;
         float m_timeSeconds = 0.0f;
         float m_broadcastTimer = 0.0f;
+        std::uint64_t m_phaseSerial = 0;
+        float m_heartbeatTimer = 0.0f;
+        float m_lastServerPacket = 0.0f;
+        std::unordered_map<std::string, float> m_peerLastPacket;
         float m_relayControlTimer = 0.0f;
         float m_relayKeepAliveTimer = 0.0f;
         std::uint32_t m_relayLobbyCode = 0;

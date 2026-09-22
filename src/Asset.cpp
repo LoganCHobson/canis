@@ -1254,7 +1254,7 @@ namespace Canis
     void MetaFileAsset::Save()
     {
         YAML::Node node;
-        if(type==FileType::SHADERGRAPH && std::filesystem::exists(path+".meta"))
+        if((type==FileType::SHADERGRAPH || type==FileType::CSHARP) && std::filesystem::exists(path+".meta"))
             node=YAML::LoadFile(path+".meta");
         node["FileType"] = FileTypeToString(type);
         node["UUID"] = std::to_string(uuid);

@@ -15,7 +15,17 @@ internal static class ComponentStore
     private static readonly Dictionary<(ulong,ulong),State> instances=[];
     private static readonly HashSet<string> reportedMissing=[];
     internal static bool Running;
-    internal static string Id(Type t)=>t.GetCustomAttribute<ScriptIdAttribute>()?.Id ?? t.FullName!;
+    private static ScriptAssetAttribute? AssetIdentity(Type type) =>
+        type.Assembly.GetCustomAttributes<ScriptAssetAttribute>().SingleOrDefault(asset => asset.Type == type);
+    internal static string Id(Type type) => type.GetCustomAttribute<ScriptIdAttribute>()?.Id
+        ?? AssetIdentity(type)?.Id ?? type.FullName!;
+    private static string[] Aliases(Type type)
+    {
+        var aliases = type.GetCustomAttributes<ScriptAliasAttribute>().Select(alias => alias.Id);
+        var legacy = AssetIdentity(type)?.LegacyId;
+        if (!string.IsNullOrEmpty(legacy)) aliases = aliases.Append(legacy);
+        return aliases.Distinct(StringComparer.Ordinal).ToArray();
+    }
     private static IEnumerable<string> ReferenceTypes(Type type) {
         for(Type? t=type;t is not null && typeof(Component).IsAssignableFrom(t);t=t.BaseType)yield return Id(t);
     }
@@ -28,11 +38,11 @@ internal static class ComponentStore
     internal static Description[] Describe(IEnumerable<Type> all)
     {
         var result=all.Where(t=>t.IsSubclassOf(typeof(Component)) && !typeof(NativeComponent).IsAssignableFrom(t) && !t.IsAbstract).OrderBy(t=>t.FullName,StringComparer.Ordinal)
-            .Select(t=>new Description(t,Id(t),t.GetCustomAttributes<ScriptAliasAttribute>().Select(a=>a.Id).ToArray(),Fields(t).ToArray())).ToArray();
+            .Select(t=>new Description(t,Id(t),Aliases(t),Fields(t).ToArray())).ToArray();
         var ids=new HashSet<string>();
         foreach(var d in result) {
             if(!d.Type.IsPublic || d.Type.ContainsGenericParameters || d.Type.GetConstructor(Type.EmptyTypes) is null)throw new InvalidOperationException($"{d.Type} needs a public parameterless constructor.");
-            foreach(var id in d.Aliases.Prepend(d.Id))if(string.IsNullOrWhiteSpace(id) || !ids.Add(id))throw new InvalidOperationException($"Duplicate or empty ScriptId/ScriptAlias: {id}");
+            foreach(var id in d.Aliases.Prepend(d.Id))if(string.IsNullOrWhiteSpace(id) || !ids.Add(id))throw new InvalidOperationException($"Duplicate or empty script UUID/ScriptId/ScriptAlias: {id}");
             var fields=new HashSet<string>();foreach(var f in d.Fields){Kind(f.FieldType);if(!fields.Add(f.Name))throw new InvalidOperationException($"Hidden serialized field: {d.Type}.{f.Name}");}
         }
         return result;

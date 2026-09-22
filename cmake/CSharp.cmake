@@ -25,8 +25,10 @@ get_filename_component(_canis_host_include "${_canis_host_header}" DIRECTORY)
 set(CANIS_MANAGED_HOST_DIR "${CMAKE_BINARY_DIR}/managed/host")
 file(GLOB_RECURSE _canis_managed_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/managed/*.cs" "${CMAKE_CURRENT_SOURCE_DIR}/managed/*.csproj")
 list(FILTER _canis_managed_sources EXCLUDE REGEX "/(obj|bin)/")
-add_custom_command(OUTPUT "${CANIS_MANAGED_HOST_DIR}/Canis.ManagedHost.dll" "${CANIS_MANAGED_HOST_DIR}/Canis.Core.dll" "${CANIS_MANAGED_HOST_DIR}/Canis.ManagedHost.runtimeconfig.json"
+add_custom_command(OUTPUT "${CANIS_MANAGED_HOST_DIR}/Canis.ManagedHost.dll" "${CANIS_MANAGED_HOST_DIR}/Canis.Core.dll" "${CANIS_MANAGED_HOST_DIR}/Canis.ManagedHost.runtimeconfig.json" "${CANIS_MANAGED_HOST_DIR}/Canis.ScriptMetadata.dll"
     COMMAND "${CANIS_DOTNET_EXECUTABLE}" build "${CMAKE_CURRENT_SOURCE_DIR}/managed/Canis.ManagedHost/Canis.ManagedHost.csproj"
+        --output "${CANIS_MANAGED_HOST_DIR}" --artifacts-path "${CMAKE_BINARY_DIR}/managed/artifacts" --nologo
+    COMMAND "${CANIS_DOTNET_EXECUTABLE}" build "${CMAKE_CURRENT_SOURCE_DIR}/managed/Canis.ScriptMetadata/Canis.ScriptMetadata.csproj"
         --output "${CANIS_MANAGED_HOST_DIR}" --artifacts-path "${CMAKE_BINARY_DIR}/managed/artifacts" --nologo
     DEPENDS ${_canis_managed_sources} VERBATIM)
 add_custom_target(CanisManagedHost DEPENDS "${CANIS_MANAGED_HOST_DIR}/Canis.ManagedHost.dll")
@@ -37,6 +39,9 @@ target_compile_definitions(${CANIS_ENGINE_LIB} PRIVATE
     CANIS_MANAGED_HOST_DIR="${CANIS_MANAGED_HOST_DIR}"
     CANIS_HOSTFXR_PATH="${CANIS_HOSTFXR_PATH}")
 if(BUILD_TESTING)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME CanisCSharpMetadataTests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/CSharpMetadataTests.py" "${CANIS_MANAGED_HOST_DIR}/Canis.Core.dll" "${CANIS_MANAGED_HOST_DIR}/Canis.ScriptMetadata.dll")
+    set_tests_properties(CanisCSharpMetadataTests PROPERTIES TIMEOUT 120)
     add_executable(CanisCSharpComponentsTests tests/CSharpComponentsTests.cpp)
     target_link_libraries(CanisCSharpComponentsTests PRIVATE ${CANIS_ENGINE_LIB} SDL3::SDL3)
     add_test(NAME CanisCSharpComponentsTests COMMAND CanisCSharpComponentsTests)

@@ -15606,7 +15606,7 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
         if(ImGui::MenuItem("C# Entity Script")) {
             int suffix=0;fs::path path;std::string name;
             do{name="NewBehaviour"+(suffix?std::to_string(suffix):"");path=_folderPath/(name+".cs");++suffix;}while(fs::exists(path));
-            std::ofstream file(path);file<<"using Canis;\n\n[ScriptId(\""<<std::to_string(static_cast<uint64_t>(UUID()))<<"\")]\npublic sealed class "<<name<<" : ScriptableEntity\n{\n    [SerializeField] private float speed = 1f;\n    public override void OnCreate() { }\n    public override void Update(float deltaTime) { }\n}\n";file.close();
+            std::ofstream file(path);file<<"using Canis;\n\npublic sealed class "<<name<<" : ScriptableEntity\n{\n    [SerializeField] private float speed = 1f;\n    public override void OnCreate() { }\n    public override void Update(float deltaTime) { }\n}\n";file.close();
             if(file){(void)AssetManager::GetMetaFile(path.string());OpenScriptDocument(path);}
         }
         if (ImGui::MenuItem("C# System (experimental)"))

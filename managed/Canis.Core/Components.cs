@@ -1,6 +1,15 @@
 using System.Numerics;
 namespace Canis;
 
+// Emitted by the asset compiler; gameplay scripts do not need identity attributes.
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple=true)]
+public sealed class ScriptAssetAttribute(Type type, string id, string legacyId = "") : Attribute
+{
+    public Type Type { get; } = type;
+    public string Id { get; } = id;
+    public string LegacyId { get; } = legacyId;
+}
+
 [AttributeUsage(AttributeTargets.Class, Inherited=false)]
 public sealed class ScriptIdAttribute(string id) : Attribute { public string Id { get; }=id; }
 [AttributeUsage(AttributeTargets.Class, AllowMultiple=true, Inherited=false)]

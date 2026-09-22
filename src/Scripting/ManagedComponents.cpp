@@ -87,7 +87,7 @@ ManagedJson EncodeAttachments(Entity& entity) {
 }
 void EncodeManagedComponents(YAML::Node& node, Entity& entity) {
     if(!entity.HasComponent<ManagedComponents>())return;
-    auto list=EncodeAttachments(entity);for(auto& a:list)a.erase("token");
+    auto list=EncodeAttachments(entity);for(auto& a:list){a.erase("token");a["type"]=Canonical(a["type"].get<std::string>());}
     node["Canis::ManagedScripts"]=ToYaml(list);
 }
 void DecodeManagedComponents(const YAML::Node& node, Entity& entity) {

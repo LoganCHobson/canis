@@ -493,7 +493,11 @@ namespace Canis
         m_players.push_back(NetworkPlayer{ .id = 1, .name = m_playerName, .ready = true, .host = true, .connected = true });
 
         if (!m_impl->Open(_port))
-            Debug::Warning("NetworkSession host could not open UDP port %u through SDL3_net. Continuing as local host.", static_cast<unsigned int>(_port));
+        {
+            m_lastNetworkError = "Could not open host port (already in use?)";
+            Disconnect();
+            return false;
+        }
         else
             Debug::Log("Hosting network session on UDP port %u.", static_cast<unsigned int>(_port));
 
@@ -524,12 +528,14 @@ namespace Canis
 
         if (!m_impl->Open(0))
         {
-            Debug::Warning("NetworkSession client could not open a UDP socket through SDL3_net.");
+            m_lastNetworkError = "Could not open client socket";
+            Disconnect();
             return false;
         }
 
         if (!m_impl->ResolveServer(address, _port))
         {
+            m_lastNetworkError = "Could not resolve host address";
             Debug::Warning("NetworkSession could not resolve host '%s:%u' through SDL3_net.", address.c_str(), static_cast<unsigned int>(_port));
             Disconnect();
             return false;
@@ -641,6 +647,10 @@ namespace Canis
         m_gameStates.clear();
         m_gameActions.clear();
         m_broadcastTimer = 0.0f;
+        m_phaseSerial = 0;
+        m_heartbeatTimer = 0.0f;
+        m_lastServerPacket = m_timeSeconds;
+        m_peerLastPacket.clear();
         m_relayControlTimer = 0.0f;
         m_relayKeepAliveTimer = 0.0f;
         m_relayLobbyCode = 0;
@@ -690,6 +700,29 @@ namespace Canis
             }
         }
 
+        if (m_mode == NetworkMode::Client && m_transport == NetworkTransport::Direct)
+        {
+            if (m_timeSeconds - m_lastServerPacket > 12.f)
+            {
+                m_lastNetworkError = "Host timed out";
+                Disconnect();
+                return;
+            }
+            m_heartbeatTimer += _deltaTime;
+            if (m_localClientId != 0 && m_heartbeatTimer >= 1.f)
+            {
+                m_heartbeatTimer = 0.f;
+                SendMessageToServer("PING");
+            }
+        }
+        if (m_mode == NetworkMode::Host && m_transport == NetworkTransport::Direct)
+        {
+            std::vector<std::string> expired;
+            for (const auto& [peer,time] : m_peerLastPacket)
+                if (m_timeSeconds - time > 12.f) expired.push_back(peer);
+            for (const auto& peer : expired) HandlePacket("BYE", peer);
+        }
+
         if (m_transport == NetworkTransport::Direct && m_mode == NetworkMode::Client && m_localClientId == 0)
         {
             m_broadcastTimer += _deltaTime;
@@ -708,6 +741,11 @@ namespace Canis
             {
                 m_broadcastTimer = 0.0f;
                 BroadcastPlayers();
+                // Repeated phase announcements recover a dropped transition packet.
+                if (m_phase == NetworkPhase::Match)
+                    BroadcastMessage("START|" + m_matchScenePath + "|" + FormatFloat(m_matchRemainingSeconds) + "|" + std::to_string(m_phaseSerial));
+                else if (m_phase == NetworkPhase::Lobby)
+                    BroadcastMessage("LOBBY|" + m_lobbyScenePath + "|" + std::to_string(m_phaseSerial));
             }
 
             if (m_phase == NetworkPhase::Match)
@@ -756,6 +794,7 @@ namespace Canis
         if (!IsHost() || _scenePath.empty())
             return false;
 
+        ++m_phaseSerial;
         m_phase = NetworkPhase::Match;
         m_matchScenePath = _scenePath;
         m_matchDurationSeconds = std::max(1.0f, _durationSeconds);
@@ -767,7 +806,7 @@ namespace Canis
         m_gameStates.clear();
         m_gameActions.clear();
 
-        BroadcastMessage("START|" + m_matchScenePath + "|" + FormatFloat(m_matchDurationSeconds));
+        BroadcastMessage("START|" + m_matchScenePath + "|" + FormatFloat(m_matchDurationSeconds) + "|" + std::to_string(m_phaseSerial));
         m_app.LoadScene(m_matchScenePath);
         return true;
     }
@@ -777,6 +816,7 @@ namespace Canis
         if (m_mode == NetworkMode::Offline)
             return;
 
+        if (IsHost()) ++m_phaseSerial;
         m_phase = NetworkPhase::Lobby;
         m_matchRemainingSeconds = 0.0f;
         m_transformStates.clear();
@@ -787,7 +827,7 @@ namespace Canis
         m_gameActions.clear();
 
         if (m_mode == NetworkMode::Host)
-            BroadcastMessage("LOBBY|" + m_lobbyScenePath);
+            BroadcastMessage("LOBBY|" + m_lobbyScenePath + "|" + std::to_string(m_phaseSerial));
 
         LoadLobbyScene();
     }
@@ -1069,6 +1109,18 @@ namespace Canis
             return;
 
         const std::string &type = parts[0];
+        if (m_mode == NetworkMode::Client && m_transport == NetworkTransport::Direct)
+        {
+            if (_peerKey != AddressKey(m_impl->serverEndpoint.address, m_impl->serverEndpoint.port)) return;
+            m_lastServerPacket = m_timeSeconds;
+        }
+        if (m_mode == NetworkMode::Host)
+        {
+            bool known = false;
+            for (const auto& [id, peer] : m_impl->clientPeerKeys) if (peer == _peerKey) known = true;
+            if (!known && type != "HELLO") return;
+            if (known && type != "BYE") m_peerLastPacket[_peerKey] = m_timeSeconds;
+        }
 
         if (m_mode == NetworkMode::Host)
         {
@@ -1094,6 +1146,7 @@ namespace Canis
                     clientId = m_nextClientId++;
                     m_impl->clientPeerKeys[clientId] = _peerKey;
                 }
+                m_peerLastPacket[_peerKey] = m_timeSeconds;
 
                 AddOrUpdatePlayer(NetworkPlayer{ .id = clientId, .name = parts[1], .ready = true, .host = false, .connected = true });
                 Debug::Log(
@@ -1105,7 +1158,7 @@ namespace Canis
                 m_impl->SendToPeer(_peerKey, "WELCOME|" + std::to_string(clientId) + "|" + m_lobbyScenePath);
                 BroadcastPlayers();
                 if (m_phase == NetworkPhase::Match)
-                    BroadcastMessage("START|" + m_matchScenePath + "|" + FormatFloat(m_matchRemainingSeconds));
+                    BroadcastMessage("START|" + m_matchScenePath + "|" + FormatFloat(m_matchRemainingSeconds) + "|" + std::to_string(m_phaseSerial));
             }
             else if (type == "STATE" && parts.size() >= 8u)
             {
@@ -1197,6 +1250,7 @@ namespace Canis
                         m_players.end());
                     m_impl->clientPeerKeys.erase(departingId);
                     m_impl->peers.erase(_peerKey);
+                    m_peerLastPacket.erase(_peerKey);
                     BroadcastPlayers();
                 }
             }
@@ -1208,6 +1262,7 @@ namespace Canis
         {
             if (type == "WELCOME" && parts.size() >= 3u)
             {
+                if (m_localClientId != 0) return;
                 m_localClientId = ParseNumber<NetworkClientId>(parts[1], 0);
                 m_lobbyScenePath = parts[2];
                 m_phase = NetworkPhase::Lobby;
@@ -1239,6 +1294,16 @@ namespace Canis
             }
             else if (type == "START" && parts.size() >= 3u)
             {
+                if (m_localClientId == 0) return;
+                // A serial distinguishes retransmission from an intentional restart of
+                // the same scene, even if a client missed the intervening lobby.
+                const auto serial = parts.size() >= 4u ? ParseNumber<std::uint64_t>(parts[3], 0) : 0;
+                if (serial != 0)
+                {
+                    if (serial <= m_phaseSerial) return;
+                    m_phaseSerial = serial;
+                }
+                else if (m_phase == NetworkPhase::Match && m_matchScenePath == parts[1]) return;
                 m_phase = NetworkPhase::Match;
                 m_matchScenePath = parts[1];
                 m_matchRemainingSeconds = ParseNumber(parts[2], 60.0f);
@@ -1246,16 +1311,28 @@ namespace Canis
                 m_inputStates.clear();
                 m_rigidbodyStates.clear();
                 m_combatStates.clear();
+                m_gameStates.clear();
+                m_gameActions.clear();
                 m_app.LoadScene(m_matchScenePath);
             }
             else if (type == "LOBBY" && parts.size() >= 2u)
             {
+                if (m_localClientId == 0) return;
+                const auto serial = parts.size() >= 3u ? ParseNumber<std::uint64_t>(parts[2], 0) : 0;
+                if (serial != 0)
+                {
+                    if (serial <= m_phaseSerial) return;
+                    m_phaseSerial = serial;
+                }
+                else if (m_phase == NetworkPhase::Lobby) return;
                 m_lobbyScenePath = parts[1];
                 m_phase = NetworkPhase::Lobby;
                 m_transformStates.clear();
                 m_inputStates.clear();
                 m_rigidbodyStates.clear();
                 m_combatStates.clear();
+                m_gameStates.clear();
+                m_gameActions.clear();
                 LoadLobbyScene();
             }
             else if (type == "STATE" && parts.size() >= 8u)
@@ -1299,6 +1376,7 @@ namespace Canis
             }
             else if (type == "REJECT" || type == "CLOSED")
             {
+                m_lastNetworkError = type == "REJECT" ? "Lobby full (four players maximum)" : "Host closed the session";
                 Disconnect();
             }
             else if (type == "COMBAT" && parts.size() >= 9u)
