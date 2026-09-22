@@ -91,11 +91,16 @@ void EncodeManagedComponents(YAML::Node& node, Entity& entity) {
     node["Canis::ManagedScripts"]=ToYaml(list);
 }
 void DecodeManagedComponents(const YAML::Node& node, Entity& entity) {
-    if(!node["Canis::ManagedScripts"])return;
-    auto list=FromYaml(node["Canis::ManagedScripts"]);
-    if(!list.is_array())throw std::invalid_argument("ManagedScripts must be an array");
-    for(auto& item:list) {
-        auto& a=Add(entity,item.at("type").get<std::string>());
+    const auto scripts = node["Canis::ManagedScripts"];
+    if (!scripts) return;
+    if (!scripts.IsSequence()) throw std::invalid_argument("ManagedScripts must be an array");
+    for (const auto& script : scripts) {
+        const auto type = script["type"];
+        if (!type.IsScalar()) throw std::invalid_argument("Managed script type must be a script ID or metadata UUID");
+        // A scene save can emit numeric metadata IDs without quotes. Identity
+        // is always text: preserve the YAML scalar rather than inferring a JSON number.
+        auto item = FromYaml(script);
+        auto& a = Add(entity, type.Scalar());
         a.enabled=item.value("enabled",true);a.fields=item.value("fields",ManagedJson::object());
         for(auto& [name,value]:a.fields.items())if(value.is_object() && value.contains("entity")) {
             auto id=value["entity"].is_string()?std::stoull(value["entity"].get<std::string>()):value["entity"].get<uint64_t>();

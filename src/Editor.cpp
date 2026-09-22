@@ -2247,7 +2247,9 @@ namespace Canis
                 }
             }
 
+            _app->scene.tweens.Clear();
             GameCodeObjectShutdownFunction(_gameCodeObject, _app);
+            _app->scene.tweens.Clear();
 
             if (_gameCodeObject->sharedObjectHandle != nullptr)
             {
@@ -18531,6 +18533,15 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Launch a separate no-editor runtime using Project Settings.");
             ImGui::SameLine();
+            if (ImGui::Button("Release##ScenePanel"))
+            {
+                std::string startup = AssetManager::ResolvePath(GetProjectConfig().launchScene);
+                if (startup.empty()) startup = m_scene->m_path;
+                m_release.Open(FindGameCodeRoot(), startup);
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Build and package the project for Desktop, Web, or VR.");
+            ImGui::SameLine();
             if ((ImGui::Button("Reload##ScenePanel") || m_scriptBuildRequested || (std::filesystem::path(m_activeScriptDocument).extension() != ".cs" && m_meshEditEntity == UUID(0) && ImGui::IsKeyDown(ImGuiKey_R) && ImGui::IsKeyDown(ImGuiKey_LeftCtrl) && hotKeyCoolDown < 0.0f)) && SaveScriptDocuments())
             {
                 m_scriptBuildRequested = false;
@@ -18734,6 +18745,10 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
 
         ImGui::End();
         DrawReloadBuildPopup();
+        m_release.Draw(static_cast<SDL_Window*>(m_window->GetSDLWindow()), [this]()
+        {
+            return SaveScriptDocuments() && SaveActiveSceneTab();
+        });
         if (!m_vrPlayError.empty()) ImGui::OpenPopup("Headset Play");
         ImGui::SetNextWindowSize(ImVec2(580,0), ImGuiCond_Appearing);
         if (ImGui::BeginPopupModal("Headset Play", nullptr, ImGuiWindowFlags_AlwaysAutoResize))

@@ -1,3 +1,4 @@
+#include <Canis/Scripting/TweenBindings.hpp>
 #include <Canis/Scripting/ManagedComponents.hpp>
 #include <Canis/Scripting/SceneBindings.hpp>
 #include <Canis/Scripting/NativeComponentFields.generated.hpp>
@@ -9,6 +10,7 @@
 #include <Canis/Terrain.hpp>
 #include <Canis/Blockout.hpp>
 #include <Canis/InputManager.hpp>
+#include <Canis/Scripting/InputBindings.hpp>
 #include <Canis/AudioManager.hpp>
 #include <Canis/Audio.hpp>
 #include <Canis/VR/VRSystem.hpp>
@@ -172,6 +174,8 @@ void RegisterSceneBindings(App& app)
     bindings.RemoveOwner("Canis.Scene");
     auto context = std::make_shared<Context>(app);
     RegisterManagedBindings(app, [context](Entity* e){return context->Handle(e);}, [context](uint64_t id){return context->Resolve(id);});
+    RegisterTweenBindings(app, [context](uint64_t id){return context->Resolve(id);});
+    RegisterInputBindings(app);
     constexpr auto owner = "Canis.Scene";
     bindings.Method(owner,"Component","Token",[context](uint64_t id,std::string type)->uint64_t{return context->Token(id,type);});
     bindings.Method(owner,"Component","Types",[context]()->std::string {
@@ -280,6 +284,10 @@ void RegisterSceneBindings(App& app)
         if (t.useLocalMatrixPrefix) throw std::runtime_error("Bone-space rotation writes are not supported by this binding");
         t.rotation = glm::normalize(rotation);
     });
+    bindings.Method(owner,"Transform","LocalPosition",[context](uint64_t id)->Vector3{return context->Component<Transform>(id).position;});
+    bindings.Method(owner,"Transform","SetLocalPosition",[context](uint64_t id,Vector3 v){Finite(v);context->Component<Transform>(id).position=v;});
+    bindings.Method(owner,"Transform","LocalRotation",[context](uint64_t id)->Quaternion{return context->Component<Transform>(id).rotation;});
+    bindings.Method(owner,"Transform","SetLocalRotation",[context](uint64_t id,Quaternion v){if(!std::isfinite(glm::length(v))||glm::length(v)<1e-6f)throw std::invalid_argument("Invalid quaternion");context->Component<Transform>(id).rotation=glm::normalize(v);});
     bindings.Method(owner, "Transform", "Scale", [context](uint64_t id) -> Vector3 { return context->Component<Transform>(id).scale; });
     bindings.Method(owner, "Transform", "SetScale", [context](uint64_t id, Vector3 scale)
     { Finite(scale); context->Component<Transform>(id).scale = scale; });

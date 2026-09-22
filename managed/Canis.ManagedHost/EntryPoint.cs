@@ -86,12 +86,15 @@ public static unsafe class EntryPoint
                     if (running) foreach (var instance in instances)
                         if (!instance.Failed) Invoke(instance, s => s.Update((float)command->Delta));
                     return 0;
+                case 11:
+                    Canis.Tweening.TweenCallbacks.Invoke((int)command->Delta, command->Length);
+                    return 0;
                 case 10:
                     if(!running || active is null || pending is null)return -1;
                     var snapshot=ComponentStore.Capture();
                     ComponentStore.ValidateSnapshot(pending.Components,snapshot);
                     foreach(var instance in instances)Invoke(instance,s=>s.Destroy());instances.Clear();
-                    ComponentStore.Stop();ComponentStore.Clear();Retire(active);active=pending;pending=null;
+                    ComponentStore.Stop();Canis.Tweening.TweenCallbacks.Clear();ComponentStore.Clear();Retire(active);active=pending;pending=null;
                     ComponentStore.Configure(active.Components,active.Manifest);ComponentStore.StartRestored(snapshot);
                     foreach(var type in active.Types){var instance=new Instance((GameSystem)Activator.CreateInstance(type)!);instances.Add(instance);Invoke(instance,s=>s.Start());}
                     Write("C#: stateful component reload committed; scene-wide systems restarted.");return 0;
@@ -141,6 +144,7 @@ public static unsafe class EntryPoint
     {
         ComponentStore.Stop();
         foreach (var instance in instances) Invoke(instance, s => s.Destroy());
+        Canis.Tweening.TweenCallbacks.Clear();
         instances.Clear(); running = false;
     }
     [MethodImpl(MethodImplOptions.NoInlining)]

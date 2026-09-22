@@ -18,6 +18,7 @@ namespace Canis::Scripting
         void Tick(bool playSession, bool paused, float dt, bool executeCallbacks = true);
         void RunGameplay(bool paused, float dt);
         void StopSession();
+        void RunTween(int registration, int action);
         std::string ProjectPath() const;
         void RequestLanguage(const std::string& method, const std::string& path, const std::string& text, int cursor, const std::map<std::string,std::string>& overlays = {}, const std::string& newName = "");
         std::vector<ScriptEditing::LanguageReply> PollLanguage();

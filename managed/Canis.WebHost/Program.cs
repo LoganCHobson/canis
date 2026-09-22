@@ -19,6 +19,9 @@ public static partial class Program
     [JSImport("dispatch", "canis")]
     internal static partial string Dispatch(string request);
 
+    [JSImport("tweenExchange", "canis")]
+    internal static partial double TweenExchange(int action, double x, double y, double z, double w);
+
     [JSExport]
     public static string Command(int operation, double delta)
     {
@@ -67,8 +70,12 @@ public static partial class Program
                 case 3:
                     ComponentStore.Stop();
                     foreach (var instance in instances) Invoke(instance, s => s.Destroy());
+                    Canis.Tweening.TweenCallbacks.Clear();
                     instances.Clear();
                     running = false;
+                    break;
+                case 4:
+                    Canis.Tweening.TweenCallbacks.Invoke((int)(delta % 4294967296d), (int)(delta / 4294967296d));
                     break;
                 default: throw new ArgumentOutOfRangeException(nameof(operation));
             }

@@ -136,6 +136,8 @@ public sealed class Transform : NativeComponent
     }
     public Vector3 Position {get {Validate();return NativeBridge.Call<Vector3>("Transform.Position",Owner!.Handle);}set {Validate();NativeBridge.Call("Transform.SetPosition",Owner!.Handle,value);}}
     public Quaternion Rotation {get {Validate();return NativeBridge.Call<Quaternion>("Transform.Rotation",Owner!.Handle);}set {Validate();NativeBridge.Call("Transform.SetRotation",Owner!.Handle,value);}}
+    public Vector3 LocalPosition { get { Validate(); return NativeBridge.Call<Vector3>("Transform.LocalPosition", Owner!.Handle); } set { Validate(); NativeBridge.Call("Transform.SetLocalPosition", Owner!.Handle, value); } }
+    public Quaternion LocalRotation { get { Validate(); return NativeBridge.Call<Quaternion>("Transform.LocalRotation", Owner!.Handle); } set { Validate(); NativeBridge.Call("Transform.SetLocalRotation", Owner!.Handle, value); } }
     public Vector3 LocalScale {get {Validate();return NativeBridge.Call<Vector3>("Transform.Scale",Owner!.Handle);}set {Validate();NativeBridge.Call("Transform.SetScale",Owner!.Handle,value);}}
     public void Translate(Vector3 delta)=>Position+=delta;
 }

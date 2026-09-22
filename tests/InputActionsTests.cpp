@@ -88,6 +88,15 @@ static void ControllerQueries()
 }
 int main()
 {
+    {
+        InputActionSystem input; Setup(input);
+        input.Record("Gamepad/South", {1,0}, 10); input.Evaluate(true);
+        Check(input.PromptScheme() == InputScheme::Gamepad, "Controller selects controller prompts");
+        input.Record("Mouse/Delta", {.1f,0}); input.Evaluate(true);
+        Check(input.PromptScheme() == InputScheme::Gamepad, "Mouse noise does not steal controller prompts");
+        input.Record("Mouse/Delta", {3,0}); input.Evaluate(true);
+        Check(input.PromptScheme() == InputScheme::KeyboardMouse, "Mouse motion restores keyboard/mouse prompts");
+    }
     ControllerQueries();
     InputActionSystem input; Setup(input);
     auto jump=[&](){return input.Action({1001});};

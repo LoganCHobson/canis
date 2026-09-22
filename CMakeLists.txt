@@ -23,6 +23,7 @@ else()
     # Inspector/tool translation units also reference the panel helper when the
     # editor runtime is disabled, so keep that small ImGui helper linked.
     list(REMOVE_ITEM CANIS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/Editor.cpp")
+    list(REMOVE_ITEM CANIS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/EditorRelease.cpp")
     list(REMOVE_ITEM CANIS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/EditorScript.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/EditorScriptTools.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/ScriptLanguageClient.cpp")
     list(REMOVE_ITEM CANIS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/ScriptSync.cpp")
     list(REMOVE_ITEM CANIS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/CppSyntax.cpp")
@@ -101,6 +102,9 @@ target_compile_definitions(${CANIS_ENGINE_LIB} PRIVATE CANIS_HAS_FREETYPE)
 message(STATUS "CanisEngine: using vendored FreeType submodule")
 
 if(BUILD_TESTING AND NOT CANIS_PLATFORM_WEB)
+    add_executable(CanisTweenTests tests/TweenTests.cpp)
+    target_link_libraries(CanisTweenTests PRIVATE ${CANIS_ENGINE_LIB} SDL3::SDL3)
+    add_test(NAME CanisTweenTests COMMAND CanisTweenTests)
     add_executable(CanisShaderGraphTests tests/ShaderGraphTests.cpp)
     add_executable(CanisRenderOptimizationTests tests/RenderOptimizationTests.cpp)
     target_link_libraries(CanisRenderOptimizationTests PRIVATE CanisEngine libglew_static)
@@ -224,9 +228,20 @@ if(CANIS_PLATFORM_WEB)
         "SHELL:-sMAX_WEBGL_VERSION=2"
         "SHELL:--shell-file ${CMAKE_SOURCE_DIR}/project/web/shell.html"
         "SHELL:--pre-js ${CMAKE_SOURCE_DIR}/project/web/persistence.js"
-        "SHELL:--preload-file ${CMAKE_SOURCE_DIR}/project/assets@/assets"
-        "SHELL:--preload-file ${CANIS_PROJECT_CONFIG}@/project_settings/project.canis"
+        "SHELL:--preload-file \"${CANIS_BUILD_ASSETS_DIRECTORY}@/assets\""
     )
+    if(CANIS_BUILD_SETTINGS_DIRECTORY)
+        target_link_options(${PROJECT_NAME} PRIVATE
+            "SHELL:--preload-file \"${CANIS_BUILD_SETTINGS_DIRECTORY}@/project_settings\"")
+        file(GLOB_RECURSE CANIS_WEB_SETTINGS CONFIGURE_DEPENDS "${CANIS_BUILD_SETTINGS_DIRECTORY}/*")
+        set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS ${CANIS_WEB_SETTINGS})
+    else()
+        target_link_options(${PROJECT_NAME} PRIVATE
+            "SHELL:--preload-file \"${CANIS_PROJECT_CONFIG}@/project_settings/project.canis\"")
+    endif()
+    file(GLOB_RECURSE CANIS_WEB_ASSETS CONFIGURE_DEPENDS "${CANIS_BUILD_ASSETS_DIRECTORY}/*")
+    set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
+        ${CANIS_WEB_ASSETS} "${CANIS_PROJECT_CONFIG}")
 endif()
 
 target_precompile_headers(${PROJECT_NAME}

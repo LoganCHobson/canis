@@ -8,6 +8,18 @@ internal static class BrowserTransport
 {
     internal static object? Invoke(string name, object[] arguments)
     {
+        // Tween sampling is synchronous and ordered, including dependent sequence
+        // children. Keep these frequent transfers out of the JSON control channel.
+        double Exchange(int action, double x = 0, double y = 0, double z = 0, double w = 0)
+        {
+            double result = Program.TweenExchange(action, x, y, z, w);
+            if (!double.IsFinite(result)) throw new InvalidOperationException("Native tween exchange failed.");
+            return result;
+        }
+        if (name == "Tween.ReadNumber") return Exchange(0);
+        if (name == "Tween.ReadVector") return new Vector4((float)Exchange(1), (float)Exchange(2), (float)Exchange(3), (float)Exchange(4));
+        if (name == "Tween.WriteNumber") { Exchange(5, (double)arguments[0]); return null; }
+        if (name == "Tween.WriteVector") { var v = (Vector4)arguments[0]; Exchange(6, v.X, v.Y, v.Z, v.W); return null; }
         var args = new JsonArray();
         foreach (var argument in arguments) args.Add(Encode(argument));
         var request = new JsonObject { ["name"] = name, ["arguments"] = args };

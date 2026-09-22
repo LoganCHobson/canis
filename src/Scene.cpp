@@ -1,3 +1,4 @@
+#include <Canis/Time.hpp>
 #include <Canis/AudioComponents.hpp>
 #include <Canis/Audio.hpp>
 #include <Canis/Scripting/ManagedComponents.hpp>
@@ -389,6 +390,10 @@ namespace Canis
             }
 
         }
+        if (!m_paused) {
+            Profiler::Scope scope("Tween.Update", Profiler::Category::Other);
+            tweens.Update(_deltaTime, Time::UnscaledDeltaTime());
+        }
         // Animation state and model assets are commonly selected by scripts.
         // Evaluate post-script systems before rendering so a newly selected
         // skinned model never reaches the renderer with an invalid/old pose.
@@ -480,7 +485,9 @@ namespace Canis
     {
         Audio::SetScenePaused(false);
         Audio::SetListener(Vector3(0),Quaternion(1,0,0,0),1,false);
+        tweens.Clear();
         if (managedStop) managedStop();
+        tweens.Clear();
         ++m_scriptingEpoch;
         m_isUpdating = m_isLoadingEntityNodes = false;
         FlushRetiredScripts();

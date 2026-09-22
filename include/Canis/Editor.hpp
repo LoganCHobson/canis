@@ -24,6 +24,9 @@
 #include <Canis/AssetHandle.hpp>
 #include <Canis/PostProcessPipeline.hpp>
 #include <Canis/Blockout.hpp>
+#if CANIS_EDITOR
+#include <Canis/EditorRelease.hpp>
+#endif
 
 namespace Canis
 {
@@ -590,6 +593,9 @@ namespace Canis
         bool m_editorFontApplyQueued = false;
         bool m_editorFontApplyShouldSaveConfig = false;
         std::string m_queuedEditorFontPath = {};
+#if CANIS_EDITOR
+        EditorRelease m_release;
+#endif
         std::thread m_reloadBuildThread = {};
         std::mutex m_reloadBuildMutex = {};
         std::string m_reloadBuildCommand = {};

@@ -2171,6 +2171,7 @@ namespace Canis
         m_csharp = std::make_shared<Scripting::CSharpRuntime>("assets", "Library/Managed");
         std::weak_ptr<Scripting::CSharpRuntime> managed = m_csharp;
         scene.managedUpdate = [managed](float dt) { if (auto host = managed.lock()) host->RunGameplay(false, dt); };
+        scene.managedTween = [managed](int registration,int action) { if(auto host=managed.lock())host->RunTween(registration,action); else throw std::runtime_error("Managed tween host expired"); };
         scene.managedStop = [managed] { if (auto host = managed.lock()) host->StopSession(); };
         if (!runtime.editorRuntimeEnabled)
         {
@@ -2744,7 +2745,7 @@ namespace Canis
 
 #if CANIS_CSHARP
         if (m_csharp) m_csharp->StopSession();
-        scene.managedUpdate = {}; scene.managedStop = {};
+        scene.managedUpdate = {}; scene.managedStop = {}; scene.managedTween = {};
         if (runtime->editor) runtime->editor->m_csharp.reset();
         m_csharp.reset();
         Scripting::UnregisterSceneBindings();
@@ -2755,6 +2756,7 @@ namespace Canis
             Time::Quit();
         if (runtime->gameCodeInitialized)
             GameCodeObjectShutdownFunction(&runtime->gameCodeObject, this);
+        scene.tweens.Clear();
         m_network.reset();
 
         // Destroy any remaining std::function state while the game shared object is still loaded.

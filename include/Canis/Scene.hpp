@@ -4,6 +4,7 @@
 #include <Canis/Tag.hpp>
 #include <Canis/Entity.hpp>
 #include <Canis/Math.hpp>
+#include <Canis/Tweening/TweenWorld.hpp>
 #include <Canis/External/entt.hpp>
 
 #include <string>
@@ -67,6 +68,8 @@ namespace Canis
         };
 
         App* app = nullptr;
+        Tweening::TweenWorld tweens{this};
+        std::function<void(int, int)> managedTween;
         
         ~Scene();
         void Init(App *_app, Window *_window, InputManager *_inputManger);

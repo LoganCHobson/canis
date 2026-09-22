@@ -232,7 +232,7 @@ struct CSharpRuntime::Impl
     bool automatic = true, dirty = true, initialized = false, loaded = false, pending = false, playing = false, force = false, failed = false;
     unsigned generation = 0;
     std::string status = "C#: waiting for asset scan", output;
-    int Call(int op, const void* data = nullptr, int length = 0, float dt = 0)
+    int Call(int op, const void* data = nullptr, int length = 0, double dt = 0)
     { Command command{op, length, data, dt}; return dispatch ? dispatch(&command, sizeof(command)) : -1; }
     ~Impl() {
         languageStopping=true;
@@ -248,6 +248,9 @@ CSharpRuntime::CSharpRuntime(const std::filesystem::path& assets, const std::fil
     impl->cache = std::filesystem::absolute(cache) / ("session-" + std::to_string(SDL_GetTicksNS()));
 }
 CSharpRuntime::~CSharpRuntime() = default;
+void CSharpRuntime::RunTween(int registration,int action) {
+    if(impl->Call(11,nullptr,action,registration)!=0)throw std::runtime_error("Managed tween callback failed");
+}
 std::string CSharpRuntime::ProjectPath() const {return (impl->cache.parent_path()/"IDE/Game.Runtime.csproj").string();}
 void CSharpRuntime::RequestLanguage(const std::string& method,const std::string& path,const std::string& text,int cursor,const std::map<std::string,std::string>& overlays,const std::string& newName) {
     auto& s=*impl;

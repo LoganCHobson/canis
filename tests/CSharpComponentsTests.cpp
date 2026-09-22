@@ -19,11 +19,34 @@ static void Check(bool value,const char* message){if(!value)throw std::runtime_e
 static std::string Read(const fs::path& p){std::ifstream f(p);return {std::istreambuf_iterator<char>(f),{}};}
 static void Write(const fs::path& p,const std::string& s){std::ofstream(p)<<s;}
 template<class F> void Wait(CSharpRuntime& r,F predicate,bool play=false){for(int i=0;i<1000;++i){r.Tick(play,false,.01f);if(predicate())return;SDL_Delay(25);}throw std::runtime_error(r.Status()+"\n"+r.BuildOutput());}
+static void CheckScriptIdentityPersistence(Scene& scene) {
+    // Scene saves may emit metadata UUIDs as bare YAML numbers. Read their
+    // exact scalar spelling, including IDs above the signed 64-bit limit.
+    for (const std::string id : {"2415903239614432105", "15598187761857189197", "18446744073709551615", "legacy.script.v1"}) {
+        for (const std::string scalar : {id, "\"" + id + "\"", "!!str " + id}) {
+            auto entity = scene.CreateEntity("Script identity regression");
+            auto node = YAML::Load("Canis::ManagedScripts: [{type: " + scalar + ", enabled: false, fields: {count: 13}}]");
+            for (int save = 0; save < 3; ++save) {
+                DecodeManagedComponents(node, entity);
+                const auto& attachment = *entity.GetComponent<ManagedComponents>().items.front();
+                Check(attachment.type == id, "Script metadata UUID changed during scene loading");
+                Check(!attachment.enabled && attachment.fields["count"] == 13, "Script fields or enabled state changed");
+                YAML::Node encoded;
+                EncodeManagedComponents(encoded, entity);
+                // Exercise the file representation, not only in-memory YAML nodes.
+                node = YAML::Load(YAML::Dump(encoded));
+                entity.RemoveComponent<ManagedComponents>();
+            }
+            entity.Destroy();
+        }
+    }
+}
 int main(){
     SDL_Init(0);auto root=fs::temp_directory_path()/("canis-components-"+std::to_string(SDL_GetTicksNS()));fs::create_directories(root/"assets");
     try {
         App app; Editor editor; app.RegisterDefaults(editor); app.scene.app=&app;RegisterSceneBindings(app);
         struct BindingCleanup { ~BindingCleanup() { UnregisterSceneBindings(); } } bindingCleanup;
+        CheckScriptIdentityPersistence(app.scene);
         auto nodes=YAML::Load(R"(
 - Entity: 101
   Name: Owner
@@ -55,7 +78,7 @@ int main(){
         auto trace=root/"trace.txt",file=root/"assets/Probe.cs";
         // The old textual attachment above must still load through the metadata alias.
         Write(file.string()+".meta", "FileType: CSHARP\nUUID: 16003035088673311249\nScriptAlias: test.probe\nname: Probe\nextension: cs\nsize: 0\nmodified: 0\n");
-        auto source=[&](std::string name,std::string field){return std::string(R"(using Canis;using System.IO;
+        auto source=[&](std::string name,std::string field){return std::string(R"(using Canis;using System.IO;using Canis.Tweening;
 [ScriptId("test.data")] public class Counter:Component { public int Value=5; }
 [ScriptId("test.fault")] public class Fault:ScriptableEntity { public override void Update(float dt) { throw new Exception("EXPECTED_CALLBACK_FAILURE"); } }
 public class )")+name+R"(:ScriptableEntity {
@@ -70,10 +93,12 @@ public ModelAsset? Mesh;
 public MaterialAsset? Material;
 public TextureAsset? Texture;
 [NonSerialized]public int Transient;
+private float tweened;
 void Emit(string s)=>File.AppendAllText(@")"+trace.string()+R"(",s+"\n");
 public override void Awake(){Emit("awake:"+)"+field+R"(+":"+Target?.Name);}
 public override void OnEnable()=>Emit("enable");
 public override void Start(){
+ Tween.To(()=>tweened,v=>tweened=v,1f,100).SetLink(Entity).OnUpdate(()=>Emit("tween:"+GetType().Name));
  if(!Canis.Entity.All().Any(e=>e.Name=="Target"))throw new Exception("Entity.All lost native-only entities");
  Emit("start");if(GetComponent<Counter>() is null)AddComponent<Counter>();
  if(TargetTransform?.Entity!=Target || Prefab is null || !Prefab.IsValid)throw new Exception("Typed reference restore failed");
@@ -128,13 +153,18 @@ public override void OnDestroy()=>Emit("destroy");
 })";};
         Write(file,source("Probe","count"));
         {
-            CSharpRuntime runtime(root/"assets",root/"cache");Wait(runtime,[&]{return runtime.ReadyToPlay();});
+            CSharpRuntime runtime(root/"assets",root/"cache");
+            app.scene.managedTween=[&](int registration,int action){runtime.RunTween(registration,action);};
+            Wait(runtime,[&]{return runtime.ReadyToPlay();});
             runtime.Tick(true,false,.01f);Check(Read(trace).find("awake:13:Target")!=std::string::npos,"Attachment/serialized references not restored before Awake");
             Check(Read(trace).find("wrapper-invalid")!=std::string::npos,"Native component lifetime guard not exercised");
             Check(Read(trace).find("gameplay-apis")!=std::string::npos,"Typed references, parenting, prefab or pooling failed");
             Check(app.scene.EncodeEntity(*entities[0])["Canis::ManagedScripts"][0]["type"].as<std::string>()=="16003035088673311249","Metadata UUID was not used when saving the old attachment");
             AssetManager::GetMetaFile(file.string())->Save();
             Check(YAML::LoadFile(file.string()+".meta")["ScriptAlias"].as<std::string>()=="test.probe","Saving metadata dropped the legacy script alias");
+            Check(app.scene.tweens.ActiveCount()==1,"Managed value tween was not registered");
+            app.scene.tweens.Update(.1,.1);
+            Check(Read(trace).find("tween:Probe")!=std::string::npos,"Native scheduler did not deliver managed tween samples/events");
             auto& attachments=entities[0]->GetComponent<ManagedComponents>();
             attachments.items[1]->fields["Value"]=9;runtime.Tick(true,false,.01f);
             Check(Read(trace).find("data:9")!=std::string::npos,"Runtime-added data component ignored Inspector edit");
@@ -145,6 +175,10 @@ public override void OnDestroy()=>Emit("destroy");
             Check(Read(trace).find("update:22")!=std::string::npos,"Inspector edits were not applied during Play");
             runtime.SetLiveReload(true);Write(file,source("RenamedProbe","renamedCount"));runtime.RefreshSources();
             Wait(runtime,[&]{return runtime.Status().find("stateful reload applied")!=std::string::npos;},true);
+            Check(app.scene.tweens.ActiveCount()==1,"Reload retained old-generation tween delegates");
+            app.scene.tweens.Update(.1,.1);
+            Check(Read(trace).find("tween:RenamedProbe")!=std::string::npos,"Reloaded tween did not execute");
+            Check(runtime.CollectRetiredContexts()==0,"Tween registry kept retired gameplay assembly alive");
             DecodeManagedComponents(YAML::Load("Canis::ManagedScripts: [{type: test.fault, enabled: true, fields: {}}]"),*entities[1]);
             runtime.Tick(true,false,.01f);
             auto diagnostics=Debug::GetEntries();
@@ -164,11 +198,14 @@ public override void OnDestroy()=>Emit("destroy");
             auto before=log.size();Write(file,"invalid C#");runtime.RefreshSources();Wait(runtime,[&]{return runtime.HasBuildError();},true);
             runtime.Tick(true,false,.01f);Check(Read(trace).size()>before,"Failed candidate stopped active component");
             runtime.StopSession();
+            Check(app.scene.tweens.ActiveCount()==0,"Stop retained managed tweens");
+            app.scene.managedTween={};
             // Missing types remain serialized and can be restored later.
             Check(app.scene.EncodeEntity(*entities[0])["Canis::ManagedScripts"].size()==2,"Managed membership not mirrored to native scene");
         }
         YAML::Node duplicateNodes(YAML::NodeType::Sequence);
         for(auto* e:app.scene.GetEntities())if(e && e->IsValid())duplicateNodes.push_back(app.scene.EncodeEntity(*e));
+        duplicateNodes = YAML::Load(YAML::Dump(duplicateNodes));
         // Duplication remaps declared entity references through native load fixups.
         auto copied=app.scene.LoadEntityNodes(duplicateNodes,false);
         auto copyData=EncodeAttachments(*copied[0]);

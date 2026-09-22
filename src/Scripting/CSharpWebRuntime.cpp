@@ -3,12 +3,27 @@
 #include <Canis/Scripting/WebBindings.hpp>
 #include <emscripten.h>
 #include <stdexcept>
+#include <limits>
 
 extern "C" EMSCRIPTEN_KEEPALIVE const char* canis_web_dispatch(const char* request)
 {
     static std::string response;
     response = Canis::Scripting::DispatchWebBinding(request ? request : "");
     return response.c_str();
+}
+
+// Hot-path tween values use typed numbers rather than per-sample JSON.
+extern "C" EMSCRIPTEN_KEEPALIVE double canis_tween_exchange(int action,double x,double y,double z,double w)
+{
+    using namespace Canis::Scripting;
+    try {
+        auto& bindings=NativeBindingRegistry::Get();
+        if(action==0)return Decode<double>(bindings.Invoke("Tween.ReadNumber",{}));
+        if(action>=1&&action<=4)return Decode<Canis::Vector4>(bindings.Invoke("Tween.ReadVector",{}))[action-1];
+        if(action==5){auto value=Encode(x);bindings.Invoke("Tween.WriteNumber",{&value,1});return 0;}
+        if(action==6){auto value=Encode(Canis::Vector4(x,y,z,w));bindings.Invoke("Tween.WriteVector",{&value,1});return 0;}
+    }catch(...) { }
+    return std::numeric_limits<double>::quiet_NaN();
 }
 
 EM_JS(int, CanisManagedCommand, (int operation, double delta), {
@@ -71,6 +86,9 @@ namespace Canis::Scripting
         if (!ReadyToPlay()) return;
         if (!s.playing) s.playing = s.Call(1);
         if (s.playing && !s.failed && !paused) s.Call(2, dt);
+    }
+    void CSharpRuntime::RunTween(int registration,int action) {
+        if(CanisManagedCommand(4,double(action)*4294967296.0+registration)!=0)throw std::runtime_error("Managed tween callback failed");
     }
     void CSharpRuntime::StopSession()
     {

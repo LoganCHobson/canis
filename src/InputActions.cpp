@@ -523,6 +523,11 @@ void InputActionSystem::EvaluateCurrent(bool active)
         if (!m_controllerSource && event.path != "Mouse/Delta" && event.path != "Mouse/Wheel" &&
             glm::length(event.value) > 0.25f && glm::length(event.value-previous) > 0.15f)
             m_promptScheme = (event.path.starts_with("Gamepad/") || event.path.starts_with("Native/")) ? InputScheme::Gamepad : InputScheme::KeyboardMouse;
+        // Intentional pointer motion/scroll also selects keyboard/mouse prompts.
+        // Ignore subpixel noise so a resting mouse cannot steal controller UI.
+        if (!m_controllerSource && ((event.path == "Mouse/Delta" && glm::length(event.value) >= 2.0f) ||
+                                    (event.path == "Mouse/Wheel" && glm::length(event.value) >= 1.0f)))
+            m_promptScheme = InputScheme::KeyboardMouse;
         previous = event.value;
         if (!m_controllerSource) CaptureEvent(event);
         Step(active);
