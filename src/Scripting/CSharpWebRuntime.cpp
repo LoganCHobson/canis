@@ -1,3 +1,4 @@
+#include <Canis/External/tinygltf/json.hpp>
 #include <Canis/Scripting/CSharpRuntime.hpp>
 #include <Canis/Scripting/NativeBindings.hpp>
 #include <Canis/Scripting/WebBindings.hpp>
@@ -37,6 +38,10 @@ EM_JS(int, CanisManagedCommand, (int operation, double delta), {
         if (Module.setStatus) Module.setStatus('C# runtime failed: ' + error.message);
         return -1;
     }
+});
+
+EM_JS(int, CanisManagedUIAction, (const char* payload), {
+    return Module.canisManaged && Module.canisManaged.UIAction(UTF8ToString(payload)) ? 1 : 0;
 });
 
 EM_JS(int, CanisManagedBindingsMatch, (const char* bindings), {
@@ -86,6 +91,11 @@ namespace Canis::Scripting
         if (!ReadyToPlay()) return;
         if (!s.playing) s.playing = s.Call(1);
         if (s.playing && !s.failed && !paused) s.Call(2, dt);
+    }
+    bool CSharpRuntime::RunUIAction(uint64_t attachment, const std::string& action) {
+        if (!impl->playing) return false;
+        const auto payload = nlohmann::json({{"token", std::to_string(attachment)}, {"action", action}}).dump();
+        return CanisManagedUIAction(payload.c_str()) == 1;
     }
     void CSharpRuntime::RunTween(int registration,int action) {
         if(CanisManagedCommand(4,double(action)*4294967296.0+registration)!=0)throw std::runtime_error("Managed tween callback failed");

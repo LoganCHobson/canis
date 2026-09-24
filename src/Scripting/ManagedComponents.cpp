@@ -70,6 +70,32 @@ ManagedAttachment& Add(Entity& entity, const std::string& type) {
     data.items.push_back(std::move(a));return *data.items.back();
 }
 }
+std::vector<ManagedUIActionOption> GetManagedUIActionOptions(Entity& entity) {
+    std::vector<ManagedUIActionOption> result;
+    if (auto* data = entity.TryGetComponent<ManagedComponents>()) for (const auto& attachment : data->items) {
+        const auto id = Canonical(attachment->type);
+        for (const auto& description : manifest) {
+            if (description.value("id", "") != id || !description.contains("uiActions")) continue;
+            const auto actions = description["uiActions"].get<std::vector<std::string>>();
+            if (!actions.empty()) result.push_back({"CSharp:" + id, description.value("name", id), actions});
+        }
+    }
+    return result;
+}
+bool DispatchManagedUIAction(Entity& entity, const std::string& script, const std::string& action) {
+    if (!entity.IsValid() || !entity.Active() || !script.starts_with("CSharp:") ||
+        !entity.scene.managedUIAction) return false;
+    const auto id = Canonical(script.substr(7));
+    auto* data = entity.TryGetComponent<ManagedComponents>();
+    if (!data) return false;
+    // Copy the identity before invoking user code; callbacks may remove their own attachment.
+    uint64_t token = 0;
+    for (const auto& attachment : data->items) if (Canonical(attachment->type) == id && attachment->enabled) {
+        if (token != 0) return false; // Never silently pick between duplicate attachments.
+        token = attachment->token;
+    }
+    return token != 0 && entity.scene.managedUIAction(token, action);
+}
 bool HasManagedScripts(Scene& scene) {
     auto view=scene.GetRegistry().view<ManagedComponents>();
     for(auto handle:view)if(!view.get<ManagedComponents>(handle).items.empty())return true;
@@ -162,7 +188,7 @@ void DrawManagedInspector(Editor& editor, Entity& entity) {
             bool open=ImGui::CollapsingHeader(title.c_str(),ImGuiTreeNodeFlags_DefaultOpen);
             if(ImGui::BeginPopupContextItem("script")) {
                 if(description && description->contains("source") && ImGui::MenuItem("Open C# script"))editor.OpenScriptDocument((*description)["source"].get<std::string>());
-                if(ImGui::MenuItem("Remove")){data->items.erase(data->items.begin()+i);ImGui::EndPopup();ImGui::PopID();continue;}
+                if(ImGui::MenuItem("Remove")){editor.NotifySceneChanged();data->items.erase(data->items.begin()+i);ImGui::EndPopup();ImGui::PopID();continue;}
                 ImGui::EndPopup();
             }
             if(open) {
@@ -171,7 +197,7 @@ void DrawManagedInspector(Editor& editor, Entity& entity) {
                     ImGui::TableSetupColumn("Label",ImGuiTableColumnFlags_WidthStretch,.38f);
                     ImGui::TableSetupColumn("Value",ImGuiTableColumnFlags_WidthStretch,.62f);
                     ImGui::TableNextRow();ImGui::TableSetColumnIndex(0);ImGui::AlignTextToFramePadding();ImGui::TextUnformatted("Enabled");
-                    ImGui::TableSetColumnIndex(1);ImGui::Checkbox("##Enabled",&a.enabled);
+                    ImGui::TableSetColumnIndex(1);if(ImGui::Checkbox("##Enabled",&a.enabled))editor.NotifySceneChanged();
                     for(auto& field:(*description)["fields"]) {
                         auto name=field["name"].get<std::string>(),kind=field["kind"].get<std::string>();
                         auto value=a.fields.contains(name)?a.fields[name]:field["default"];
@@ -243,7 +269,7 @@ void DrawManagedInspector(Editor& editor, Entity& entity) {
                             value=std::to_string(id);
                         }
                         else {std::string v=value.is_string()?value.get<std::string>():"";changed=ImGui::InputText("##value",&v);value=v;}
-                        if(changed)a.fields[name]=value;
+                        if(changed){a.fields[name]=value;editor.NotifySceneChanged();}
                         ImGui::PopID();
                     }
                     ImGui::EndTable();
@@ -261,7 +287,7 @@ void DrawManagedInspector(Editor& editor, Entity& entity) {
                 const auto source=std::filesystem::path(d.value("source","")).lexically_normal();
                 if(source.empty() || std::filesystem::absolute(source)!=std::filesystem::absolute(dropped))continue;
                 auto id=d["id"].get<std::string>();bool exists=false;if(auto* components=entity.TryGetComponent<ManagedComponents>())for(auto& a:components->items)if(Canonical(a->type)==Canonical(id))exists=true;
-                if(!exists){auto& a=Add(entity,id);for(auto& f:d["fields"])a.fields[f["name"].get<std::string>()]=f["default"];}
+                if(!exists){editor.NotifySceneChanged();auto& a=Add(entity,id);for(auto& f:d["fields"])a.fields[f["name"].get<std::string>()]=f["default"];}
             }
         }
         ImGui::EndDragDropTarget();
@@ -270,7 +296,7 @@ void DrawManagedInspector(Editor& editor, Entity& entity) {
     ImGui::SetNextItemWidth(-1);
     if(ImGui::BeginCombo("##AddManagedComponent","Choose script")) {
         for(auto& d:manifest) {auto id=d["id"].get<std::string>();bool exists=false;if(auto* data=entity.TryGetComponent<ManagedComponents>())for(auto& a:data->items)if(Canonical(a->type)==Canonical(id))exists=true;
-            if(!exists && ImGui::Selectable(d["name"].get<std::string>().c_str())) {auto& a=Add(entity,id);for(auto& f:d["fields"])a.fields[f["name"].get<std::string>()]=f["default"];}
+            if(!exists && ImGui::Selectable(d["name"].get<std::string>().c_str())) {editor.NotifySceneChanged();auto& a=Add(entity,id);for(auto& f:d["fields"])a.fields[f["name"].get<std::string>()]=f["default"];}
         }
         ImGui::EndCombo();
     }

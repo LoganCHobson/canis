@@ -70,6 +70,7 @@ namespace Canis
         App* app = nullptr;
         Tweening::TweenWorld tweens{this};
         std::function<void(int, int)> managedTween;
+        std::function<bool(uint64_t, const std::string&)> managedUIAction;
         
         ~Scene();
         void Init(App *_app, Window *_window, InputManager *_inputManger);

@@ -59,6 +59,15 @@ public sealed class Camera2D : NativeComponent
 
 public sealed class Canvas : NativeComponent
 {
+    public bool Active { get => GetField<bool>("active"); set => SetField("active", value); }
+    public uint RenderMode { get => GetField<uint>("renderMode"); set => SetField("renderMode", value); }
+    public uint ScaleMode { get => GetField<uint>("scaleMode"); set => SetField("scaleMode", value); }
+    public Vector2 ScreenSize { get => GetField<Vector2>("screenSize"); set => SetField("screenSize", value); }
+    public bool ReceivesEvents { get => GetField<bool>("receivesEvents"); set => SetField("receivesEvents", value); }
+    public bool NavigationEnabled { get => GetField<bool>("navigationEnabled"); set => SetField("navigationEnabled", value); }
+    public uint NavigateAction { get => GetField<uint>("navigateAction"); set => SetField("navigateAction", value); }
+    public uint ConfirmAction { get => GetField<uint>("confirmAction"); set => SetField("confirmAction", value); }
+    public float InteractionDistance { get => GetField<float>("interactionDistance"); set => SetField("interactionDistance", value); }
 }
 
 public sealed class CapsuleCollider : NativeComponent
@@ -204,6 +213,7 @@ public sealed class Terrain : NativeComponent
 public sealed class UIButton : NativeComponent
 {
     public bool Active { get => GetField<bool>("active"); set => SetField("active", value); }
+    public bool DefaultSelected { get => GetField<bool>("defaultSelected"); set => SetField("defaultSelected", value); }
     public string TargetScript { get => GetField<string>("targetScript"); set => SetField("targetScript", value); }
     public string ActionName { get => GetField<string>("actionName"); set => SetField("actionName", value); }
     public Vector4 HoverColor { get => GetField<Vector4>("hoverColor"); set => SetField("hoverColor", value); }

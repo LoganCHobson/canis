@@ -39,6 +39,7 @@
 #include <Canis/Blockout.hpp>
 
 #include <imgui.h>
+#include "EditorHistoryEvent.hpp"
 #include <imgui_stdlib.h>
 
 #include <algorithm>
@@ -1045,7 +1046,10 @@ namespace Canis
         bool DrawGenerateColliderButton(const char *_idSuffix)
         {
             const std::string label = BuildInspectorFieldLabel("Generate Collider", _idSuffix);
-            return ImGui::Button(label.c_str());
+            const bool pressed = ImGui::Button(label.c_str());
+            if (pressed)
+                ImGui::MarkItemEdited(ImGui::GetItemID());
+            return pressed;
         }
 
         void GenerateBoxColliderFromBounds(BoxCollider &_collider, const Vector3 &_min, const Vector3 &_max)
@@ -1817,93 +1821,50 @@ namespace Canis
 
         void DrawConnectedUIActionSelector(App& _app, Entity* _targetEntity, std::string& _targetScript, std::string& _actionName, const char* _idSuffix)
         {
-            std::vector<ScriptConf*> scriptOptions = GetConnectedUIScriptOptions(_app, _targetEntity);
-
-            ScriptConf* selectedScript = nullptr;
-            for (ScriptConf* option : scriptOptions)
-            {
-                if (option != nullptr && option->name == _targetScript)
-                {
-                    selectedScript = option;
-                    break;
-                }
-            }
-
-            if (selectedScript == nullptr)
-            {
-                _targetScript.clear();
-                _actionName.clear();
-            }
-
+            struct Option { std::string id, label; std::vector<std::string> actions; };
+            std::vector<Option> options;
+            for (auto* script : GetConnectedUIScriptOptions(_app, _targetEntity))
+                options.push_back({script->name, script->name, GetConnectedUIActionOptions(script)});
+            if (_targetEntity != nullptr)
+                for (const auto& script : Scripting::GetManagedUIActionOptions(*_targetEntity))
+                    options.push_back({script.script, script.name + " (C#)", script.actions});
+            auto selected = [&]() -> const Option* {
+                for (const auto& option : options) if (option.id == _targetScript) return &option;
+                return nullptr;
+            };
+            const auto* choice = selected();
             const std::string scriptLabel = BuildInspectorFieldLabel("targetScript", _idSuffix);
-            const char* scriptPreview = _targetEntity == nullptr ? "<Select Target Entity>" :
-                (_targetScript.empty() ? "<Select Script>" : _targetScript.c_str());
-
+            const std::string preview = choice ? choice->label :
+                (_targetScript.empty() ? "<Select Script>" : _targetScript + " (unavailable)");
             ImGui::BeginDisabled(_targetEntity == nullptr);
-            if (ImGui::BeginCombo(scriptLabel.c_str(), scriptPreview))
+            if (ImGui::BeginCombo(scriptLabel.c_str(), preview.c_str()))
             {
-                const bool noneSelected = _targetScript.empty();
-                if (ImGui::Selectable("<None>", noneSelected))
+                if (ImGui::Selectable("<None>", _targetScript.empty()))
                 {
                     _targetScript.clear();
                     _actionName.clear();
-                    selectedScript = nullptr;
                 }
-
-                if (noneSelected)
-                    ImGui::SetItemDefaultFocus();
-
-                for (ScriptConf* option : scriptOptions)
+                for (const auto& option : options)
                 {
-                    if (option == nullptr)
-                        continue;
-
-                    const bool isSelected = (_targetScript == option->name);
-                    if (ImGui::Selectable(option->name.c_str(), isSelected))
+                    if (ImGui::Selectable(option.label.c_str(), option.id == _targetScript))
                     {
-                        _targetScript = option->name;
-                        selectedScript = option;
+                        _targetScript = option.id;
                         _actionName.clear();
                     }
-
-                    if (isSelected)
-                        ImGui::SetItemDefaultFocus();
                 }
-
                 ImGui::EndCombo();
             }
             ImGui::EndDisabled();
-
-            std::vector<std::string> actionOptions = GetConnectedUIActionOptions(selectedScript);
-            const bool hasSelectedAction = std::find(actionOptions.begin(), actionOptions.end(), _actionName) != actionOptions.end();
-            if (!hasSelectedAction)
-                _actionName.clear();
-
+            choice = selected();
             const std::string actionLabel = BuildInspectorFieldLabel("actionName", _idSuffix);
-            const bool disableActions = selectedScript == nullptr;
-            const char* actionPreview = disableActions ? "<Select Script First>" :
-                (_actionName.empty() ? "<Select Action>" : _actionName.c_str());
-
-            ImGui::BeginDisabled(disableActions);
+            // Keep saved bindings intact while an assembly is compiling or a method is missing.
+            const char* actionPreview = _actionName.empty() ? "<Select Action>" : _actionName.c_str();
+            ImGui::BeginDisabled(choice == nullptr);
             if (ImGui::BeginCombo(actionLabel.c_str(), actionPreview))
             {
-                const bool noneSelected = _actionName.empty();
-                if (ImGui::Selectable("<None>", noneSelected))
-                    _actionName.clear();
-
-                if (noneSelected)
-                    ImGui::SetItemDefaultFocus();
-
-                for (const std::string& actionName : actionOptions)
-                {
-                    const bool isSelected = (_actionName == actionName);
-                    if (ImGui::Selectable(actionName.c_str(), isSelected))
-                        _actionName = actionName;
-
-                    if (isSelected)
-                        ImGui::SetItemDefaultFocus();
-                }
-
+                if (ImGui::Selectable("<None>", _actionName.empty())) _actionName.clear();
+                if (choice) for (const auto& action : choice->actions)
+                    if (ImGui::Selectable(action.c_str(), action == _actionName)) _actionName = action;
                 ImGui::EndCombo();
             }
             ImGui::EndDisabled();
@@ -2172,6 +2133,7 @@ namespace Canis
         std::weak_ptr<Scripting::CSharpRuntime> managed = m_csharp;
         scene.managedUpdate = [managed](float dt) { if (auto host = managed.lock()) host->RunGameplay(false, dt); };
         scene.managedTween = [managed](int registration,int action) { if(auto host=managed.lock())host->RunTween(registration,action); else throw std::runtime_error("Managed tween host expired"); };
+        scene.managedUIAction = [managed](uint64_t token, const std::string& action) { auto host = managed.lock(); return host && host->RunUIAction(token, action); };
         scene.managedStop = [managed] { if (auto host = managed.lock()) host->StopSession(); };
         if (!runtime.editorRuntimeEnabled)
         {
@@ -2745,7 +2707,7 @@ namespace Canis
 
 #if CANIS_CSHARP
         if (m_csharp) m_csharp->StopSession();
-        scene.managedUpdate = {}; scene.managedStop = {}; scene.managedTween = {};
+        scene.managedUpdate = {}; scene.managedStop = {}; scene.managedTween = {}; scene.managedUIAction = {};
         if (runtime->editor) runtime->editor->m_csharp.reset();
         m_csharp.reset();
         Scripting::UnregisterSceneBindings();
@@ -3019,6 +2981,9 @@ namespace Canis
                     comp["scaleMode"] = canvas.scaleMode;
                     comp["screenSize"] = canvas.screenSize;
                     comp["receivesEvents"] = canvas.receivesEvents;
+                    comp["navigationEnabled"] = canvas.navigationEnabled;
+                    comp["navigateAction"] = canvas.navigateAction;
+                    comp["confirmAction"] = canvas.confirmAction;
                     comp["interactionDistance"] = canvas.interactionDistance;
                     _node["Canis::Canvas"] = comp;
                 }
@@ -3033,6 +2998,9 @@ namespace Canis
                     canvas.scaleMode = canvasNode["scaleMode"].as<unsigned int>(CanvasScaleMode::SCALE_WITH_SCREEN_WIDTH);
                     canvas.screenSize = canvasNode["screenSize"].as<Vector2>(defaultScreenSize);
                     canvas.receivesEvents = canvasNode["receivesEvents"].as<bool>(true);
+                    canvas.navigationEnabled = canvasNode["navigationEnabled"].as<bool>(true);
+                    canvas.navigateAction = canvasNode["navigateAction"].as<unsigned int>(0);
+                    canvas.confirmAction = canvasNode["confirmAction"].as<unsigned int>(0);
                     canvas.interactionDistance = std::max(
                         0.0f, canvasNode["interactionDistance"].as<float>(3.0f));
                     canvas.screenSize.x = std::max(1.0f, canvas.screenSize.x);
@@ -3047,6 +3015,9 @@ namespace Canis
                 if (_entity.HasComponent<Canvas>() && ((canvas = &_entity.GetComponent<Canvas>()), true))
                 {
                     DrawInspectorField(_editor, "active", _conf.name.c_str(), canvas->active);
+                    DrawInspectorField(_editor, "navigationEnabled", _conf.name.c_str(), canvas->navigationEnabled);
+                    DrawInspectorField(_editor, "navigateAction", _conf.name.c_str(), canvas->navigateAction);
+                    DrawInspectorField(_editor, "confirmAction", _conf.name.c_str(), canvas->confirmAction);
 
                     int renderMode = static_cast<int>(canvas->renderMode);
                     if (DrawInspectorComboField("renderMode", _conf.name.c_str(), &renderMode, CanvasRenderModeLabels, IM_ARRAYSIZE(CanvasRenderModeLabels)))
@@ -3558,6 +3529,12 @@ namespace Canis
                 {
                     YAML::Node comp;
                     comp["active"] = button->active;
+                    comp["defaultSelected"] = button->defaultSelected;
+                    comp["up"] = _entity.scene.GetLiveEntityUUID(button->up);
+                    comp["down"] = _entity.scene.GetLiveEntityUUID(button->down);
+                    comp["left"] = _entity.scene.GetLiveEntityUUID(button->left);
+                    comp["right"] = _entity.scene.GetLiveEntityUUID(button->right);
+                    comp["hitRect"] = _entity.scene.GetLiveEntityUUID(button->hitRect);
                     comp["targetEntity"] = _entity.scene.GetLiveEntityUUID(button->targetEntity);
                     comp["targetScript"] = button->targetScript;
                     comp["actionName"] = button->actionName;
@@ -3573,6 +3550,17 @@ namespace Canis
                 {
                     UIButton& button = *_entity.AddComponent<UIButton>();
                     button.active = comp["active"].as<bool>(true);
+                    button.defaultSelected = comp["defaultSelected"].as<bool>(false);
+                    if (comp["hitRect"].as<Canis::UUID>(0) != Canis::UUID(0))
+                        _entity.scene.GetEntityAfterLoad(comp["hitRect"].as<Canis::UUID>(0), button.hitRect);
+                    if (comp["up"].as<Canis::UUID>(0) != Canis::UUID(0))
+                        _entity.scene.GetEntityAfterLoad(comp["up"].as<Canis::UUID>(0), button.up);
+                    if (comp["down"].as<Canis::UUID>(0) != Canis::UUID(0))
+                        _entity.scene.GetEntityAfterLoad(comp["down"].as<Canis::UUID>(0), button.down);
+                    if (comp["left"].as<Canis::UUID>(0) != Canis::UUID(0))
+                        _entity.scene.GetEntityAfterLoad(comp["left"].as<Canis::UUID>(0), button.left);
+                    if (comp["right"].as<Canis::UUID>(0) != Canis::UUID(0))
+                        _entity.scene.GetEntityAfterLoad(comp["right"].as<Canis::UUID>(0), button.right);
                     button.targetScript = comp["targetScript"].as<std::string>("");
                     button.actionName = comp["actionName"].as<std::string>("");
                     button.hoverColor = comp["hoverColor"].as<Vector4>(Color(1.0f));
@@ -3593,9 +3581,15 @@ namespace Canis
                     return;
 
                 DrawInspectorField(_editor, "active", _conf.name.c_str(), button->active);
+                DrawInspectorField(_editor, "defaultSelected", _conf.name.c_str(), button->defaultSelected);
+                DrawInspectorField(_editor, "hitRect", _conf.name.c_str(), button->hitRect);
+                DrawInspectorField(_editor, "up", _conf.name.c_str(), button->up);
+                DrawInspectorField(_editor, "down", _conf.name.c_str(), button->down);
+                DrawInspectorField(_editor, "left", _conf.name.c_str(), button->left);
+                DrawInspectorField(_editor, "right", _conf.name.c_str(), button->right);
                 DrawInspectorField(_editor, "targetEntity", _conf.name.c_str(), button->targetEntity);
 #if CANIS_EDITOR
-                DrawConnectedUIActionSelector(*this, button->targetEntity, button->targetScript, button->actionName, _conf.name.c_str());
+                DrawConnectedUIActionSelector(*this, button->targetEntity != nullptr ? button->targetEntity.TryGet() : &_entity, button->targetScript, button->actionName, _conf.name.c_str());
 #else
                 DrawInspectorField(_editor, "targetScript", _conf.name.c_str(), button->targetScript);
                 DrawInspectorField(_editor, "actionName", _conf.name.c_str(), button->actionName);
@@ -3787,7 +3781,7 @@ namespace Canis
                 DrawInspectorField(_editor, "active", _conf.name.c_str(), dropTarget->active);
                 DrawInspectorField(_editor, "targetEntity", _conf.name.c_str(), dropTarget->targetEntity);
 #if CANIS_EDITOR
-                DrawConnectedUIActionSelector(*this, dropTarget->targetEntity, dropTarget->targetScript, dropTarget->actionName, _conf.name.c_str());
+                DrawConnectedUIActionSelector(*this, dropTarget->targetEntity != nullptr ? dropTarget->targetEntity.TryGet() : &_entity, dropTarget->targetScript, dropTarget->actionName, _conf.name.c_str());
 #else
                 DrawInspectorField(_editor, "targetScript", _conf.name.c_str(), dropTarget->targetScript);
                 DrawInspectorField(_editor, "actionName", _conf.name.c_str(), dropTarget->actionName);
@@ -3939,7 +3933,10 @@ namespace Canis
                     {
                         ImGui::Text("parent: %s", transform->parent->GetName().c_str());
                         if (ImGui::Button("Unparent##Transform"))
+                        {
                             transform->Unparent();
+                            _editor.NotifySceneChanged();
+                        }
                     }
                     else
                     {
@@ -4833,10 +4830,14 @@ namespace Canis
                     static int loopCutAxis = 0;
                     const char *axisNames[] = {"X", "Y", "Z"};
                     ImGui::SetNextItemWidth(80.0f);
-                    ImGui::Combo("Cut Axis", &loopCutAxis, axisNames, IM_ARRAYSIZE(axisNames));
+                    {
+                        SceneHistoryIgnoreScope toolSettings;
+                        ImGui::Combo("Cut Axis", &loopCutAxis, axisNames, IM_ARRAYSIZE(axisNames));
+                    }
                     ImGui::SameLine();
                     if (ImGui::Button("Add Loop Cut"))
                     {
+                        _editor.NotifySceneChanged();
                         int *selectedCuts[] = {&shape.loopCutsX, &shape.loopCutsY, &shape.loopCutsZ};
                         *selectedCuts[loopCutAxis] = std::min(*selectedCuts[loopCutAxis] + 1, 32);
                     }
@@ -4845,6 +4846,7 @@ namespace Canis
                     ImGui::SameLine();
                     if (ImGui::Button("Remove Cut"))
                     {
+                        _editor.NotifySceneChanged();
                         int *selectedCuts[] = {&shape.loopCutsX, &shape.loopCutsY, &shape.loopCutsZ};
                         *selectedCuts[loopCutAxis] = std::max(*selectedCuts[loopCutAxis] - 1, 0);
                     }
@@ -4853,11 +4855,18 @@ namespace Canis
                     static float extrudeDistance = 1.0f;
                     const char *faceNames[] = {"-X Left", "+X Right", "-Y Bottom", "+Y Top", "-Z Back", "+Z Front"};
                     ImGui::SetNextItemWidth(130.0f);
-                    ImGui::Combo("Face", &extrudeFace, faceNames, IM_ARRAYSIZE(faceNames));
+                    {
+                        SceneHistoryIgnoreScope toolSettings;
+                        ImGui::Combo("Face", &extrudeFace, faceNames, IM_ARRAYSIZE(faceNames));
+                    }
                     ImGui::SetNextItemWidth(130.0f);
-                    ImGui::DragFloat("Extrude Distance", &extrudeDistance, 0.05f, 0.01f, 1000.0f, "%.2f");
+                    {
+                        SceneHistoryIgnoreScope toolSettings;
+                        ImGui::DragFloat("Extrude Distance", &extrudeDistance, 0.05f, 0.01f, 1000.0f, "%.2f");
+                    }
                     if (ImGui::Button("Extrude Face"))
                     {
+                        _editor.NotifySceneChanged();
                         const float distance = std::clamp(std::abs(extrudeDistance), 0.01f, 1000.0f);
                         switch (extrudeFace)
                         {
@@ -4875,6 +4884,7 @@ namespace Canis
                     ImGui::SameLine();
                     if (ImGui::Button("Reset Topology"))
                     {
+                        _editor.NotifySceneChanged();
                         shape.loopCutsX = 0;
                         shape.loopCutsY = 0;
                         shape.loopCutsZ = 0;
@@ -5016,6 +5026,7 @@ namespace Canis
 
                 ImGui::Separator();
 
+                SceneHistoryIgnoreScope terrainTools;
                 bool editTerrain = _editor.m_terrainToolEnabled;
                 if (ImGui::Checkbox("Edit Terrain", &editTerrain))
                 {
@@ -6474,6 +6485,9 @@ namespace Canis
     {
         if (_actionName.empty())
             return false;
+
+        if (_scriptName.starts_with("CSharp:"))
+            return Scripting::DispatchManagedUIAction(_targetEntity, _scriptName, _actionName);
 
         auto invokeAction = [&](ScriptConf& _conf) -> bool
         {

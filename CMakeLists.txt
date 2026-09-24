@@ -310,3 +310,9 @@ target_compile_definitions(${CANIS_ENGINE_LIB} PUBLIC CANIS_CSHARP=$<BOOL:${CANI
 if(CANIS_ENABLE_CSHARP)
     include(cmake/CSharp.cmake)
 endif()
+
+if(BUILD_TESTING AND NOT CANIS_PLATFORM_WEB AND CANIS_XVFB_RUN)
+    add_executable(CanisUIButtonNavigationTests tests/UIButtonNavigationTests.cpp)
+    target_link_libraries(CanisUIButtonNavigationTests PRIVATE CanisEngine)
+    add_test(NAME CanisUIButtonNavigationTests COMMAND "${CANIS_XVFB_RUN}" -a $<TARGET_FILE:CanisUIButtonNavigationTests>)
+endif()

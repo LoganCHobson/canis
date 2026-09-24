@@ -80,6 +80,7 @@ int main(){
         Write(file.string()+".meta", "FileType: CSHARP\nUUID: 16003035088673311249\nScriptAlias: test.probe\nname: Probe\nextension: cs\nsize: 0\nmodified: 0\n");
         auto source=[&](std::string name,std::string field){return std::string(R"(using Canis;using System.IO;using Canis.Tweening;
 [ScriptId("test.data")] public class Counter:Component { public int Value=5; }
+[ScriptId("test.remove")] public class RemoveButton:ScriptableEntity { public void RemoveOwner()=>Entity.Destroy(); }
 [ScriptId("test.fault")] public class Fault:ScriptableEntity { public override void Update(float dt) { throw new Exception("EXPECTED_CALLBACK_FAILURE"); } }
 public class )")+name+R"(:ScriptableEntity {
 [SerializeField,FormerlySerializedAs("count")] private int )"+field+R"(=7;
@@ -94,6 +95,14 @@ public MaterialAsset? Material;
 public TextureAsset? Texture;
 [NonSerialized]public int Transient;
 private float tweened;
+public void ButtonClick()=>Emit("button:"+GetType().Name);
+public void ButtonClick(int ignored)=>Emit("wrong-overload");
+private void HiddenButton()=>Emit("hidden-button");
+public int ReturningButton()=>42;
+public void GenericButton<T>() { }
+public static void StaticButton() { }
+public async void AsyncButton(){await System.Threading.Tasks.Task.Yield();}
+public void ThrowingButton()=>throw new Exception("EXPECTED_UI_CALLBACK_FAILURE");
 void Emit(string s)=>File.AppendAllText(@")"+trace.string()+R"(",s+"\n");
 public override void Awake(){Emit("awake:"+)"+field+R"(+":"+Target?.Name);}
 public override void OnEnable()=>Emit("enable");
@@ -154,9 +163,24 @@ public override void OnDestroy()=>Emit("destroy");
         Write(file,source("Probe","count"));
         {
             CSharpRuntime runtime(root/"assets",root/"cache");
+            app.scene.managedUIAction=[&](uint64_t token,const std::string& action){return runtime.RunUIAction(token,action);};
             app.scene.managedTween=[&](int registration,int action){runtime.RunTween(registration,action);};
             Wait(runtime,[&]{return runtime.ReadyToPlay();});
+            const auto uiOptions=GetManagedUIActionOptions(*entities[0]);
+            Check(uiOptions.size()==1 && uiOptions[0].script=="CSharp:16003035088673311249", "C# button dropdown lost stable script identity");
+            Check(uiOptions[0].actions==std::vector<std::string>({"ButtonClick","ThrowingButton"}), "C# button dropdown exposed unsupported methods or lifecycle hooks");
+            const auto binding=uiOptions[0].script;
+            auto click=[&](const std::string& action="ButtonClick"){return app.DispatchUIAction(*entities[0],binding,action,{});};
+            Check(!click(), "C# button invoked outside Play");
             runtime.Tick(true,false,.01f);Check(Read(trace).find("awake:13:Target")!=std::string::npos,"Attachment/serialized references not restored before Awake");
+            Check(click() && Read(trace).find("button:Probe")!=std::string::npos, "Button did not call attached C# instance");
+            for(const auto* invalid:{"Missing","HiddenButton","ReturningButton","GenericButton","StaticButton","AsyncButton","Start","OnDestroy"})
+                Check(!click(invalid),"C# button called an unsupported method");
+            entities[0]->SetActive(false);Check(!click(),"C# button called inactive owner");entities[0]->SetActive(true);
+            entities[0]->GetComponent<ManagedComponents>().items[0]->enabled=false;
+            Check(!click(),"C# button called disabled attachment before synchronization");
+            entities[0]->GetComponent<ManagedComponents>().items[0]->enabled=true;
+            runtime.Tick(true,true,.01f);Check(click(),"Paused menu could not invoke C# button");
             Check(Read(trace).find("wrapper-invalid")!=std::string::npos,"Native component lifetime guard not exercised");
             Check(Read(trace).find("gameplay-apis")!=std::string::npos,"Typed references, parenting, prefab or pooling failed");
             Check(app.scene.EncodeEntity(*entities[0])["Canis::ManagedScripts"][0]["type"].as<std::string>()=="16003035088673311249","Metadata UUID was not used when saving the old attachment");
@@ -178,6 +202,7 @@ public override void OnDestroy()=>Emit("destroy");
             Check(app.scene.tweens.ActiveCount()==1,"Reload retained old-generation tween delegates");
             app.scene.tweens.Update(.1,.1);
             Check(Read(trace).find("tween:RenamedProbe")!=std::string::npos,"Reloaded tween did not execute");
+            Check(click() && Read(trace).find("button:RenamedProbe")!=std::string::npos, "C# button did not resolve reloaded script instance");
             Check(runtime.CollectRetiredContexts()==0,"Tween registry kept retired gameplay assembly alive");
             DecodeManagedComponents(YAML::Load("Canis::ManagedScripts: [{type: test.fault, enabled: true, fields: {}}]"),*entities[1]);
             runtime.Tick(true,false,.01f);
@@ -197,9 +222,21 @@ public override void OnDestroy()=>Emit("destroy");
             Wait(runtime,[&]{return runtime.Status().find("stateful reload applied")!=std::string::npos;},true);
             auto before=log.size();Write(file,"invalid C#");runtime.RefreshSources();Wait(runtime,[&]{return runtime.HasBuildError();},true);
             runtime.Tick(true,false,.01f);Check(Read(trace).size()>before,"Failed candidate stopped active component");
+            auto removable=app.scene.CreateEntity("Self-removing button target");
+            DecodeManagedComponents(YAML::Load("Canis::ManagedScripts: [{type: test.remove, enabled: true, fields: {}}]"),*removable);
+            runtime.Tick(true,false,.01f);
+            const auto removedToken=removable->GetComponent<ManagedComponents>().items[0]->token;
+            Check(app.DispatchUIAction(*removable,"CSharp:test.remove","RemoveOwner",{}) && !removable,"C# callback could not destroy its own target");
+            Check(!runtime.RunUIAction(removedToken,"RemoveOwner"),"Destroyed C# target remained callable");
+            Check(!click("ThrowingButton"),"C# button exception escaped or reported success");
+            Check(!click(),"Faulted script continued receiving UI callbacks");
+            auto uiErrors=Debug::GetEntries();
+            Check(std::any_of(uiErrors.begin(),uiErrors.end(),[&](const auto& entry){return entry.file==file.string() && entry.line>0 && entry.message.find("EXPECTED_UI_CALLBACK_FAILURE")!=std::string::npos;}),"UI callback exception lost source diagnostics");
             runtime.StopSession();
+            Check(!click(),"C# button invoked after Stop");
             Check(app.scene.tweens.ActiveCount()==0,"Stop retained managed tweens");
             app.scene.managedTween={};
+            app.scene.managedUIAction={};
             // Missing types remain serialized and can be restored later.
             Check(app.scene.EncodeEntity(*entities[0])["Canis::ManagedScripts"].size()==2,"Managed membership not mirrored to native scene");
         }

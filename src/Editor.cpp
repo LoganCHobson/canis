@@ -7340,25 +7340,10 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
             return;
         }
 
-        const bool editActive = IsSceneHistoryEditInProgress();
-        if (editActive)
-        {
-            const auto* context = ImGui::GetCurrentContext();
-            // Entity inspector/environment buttons can mutate scene data without
-            // ImGui's edited flag. Keep their legacy capture behavior.
-            const bool sceneCommand = context && context->ActiveId != 0 && context->ActiveIdWindow &&
-                ((m_selectedAssetPath.empty() && std::strcmp(context->ActiveIdWindow->Name, "Inspector") == 0) ||
-                 std::strcmp(context->ActiveIdWindow->Name, "Environment") == 0);
-            m_sceneHistoryEditWasActive |= HasActiveHistoryEdit(context, ImGuizmo::IsUsing()) ||
-                sceneCommand || (context && context->DragDropPayload.Delivery);
-            return;
-        }
-
-        ImGuiContext *imguiContext = ImGui::GetCurrentContext();
-        const bool editedItemDeactivated = HasCurrentDeactivatedEdit(imguiContext);
-
-        if (m_sceneHistoryEditWasActive || editedItemDeactivated ||
-            (imguiContext && imguiContext->DragDropPayload.Delivery))
+        // Only opted-in scene properties and explicit commands set this flag.
+        // Keep an entire drag/text edit in one undo transaction.
+        m_sceneHistoryEditWasActive |= ImGuizmo::IsUsing();
+        if (m_sceneHistoryEditWasActive && !IsSceneHistoryEditInProgress())
         {
             m_sceneHistoryEditWasActive = false;
             FlushSceneHistoryPendingChange();
@@ -9653,6 +9638,7 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
 
         prefabInstance.prefab = MakeSceneAssetHandleFromPath(prefabPath);
         AssignPrefabHandle(_entity, prefabInstance.prefab);
+        NotifySceneChanged();
         m_selectedAssetPath = prefabPath;
         m_forceRefresh = true;
     }
@@ -9792,6 +9778,7 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
         }
 
         m_scene->Destroy(*_entity);
+        NotifySceneChanged();
 
         Canis::Entity *newTopLevel = InstantiatePrefabHierarchyRoot(*m_scene, prefabHandle, instanceName);
         if (newTopLevel == nullptr)
@@ -10043,8 +10030,11 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
             if (ImGui::MenuItem("Clear"))
                 *&_variable = nullptr;
 
-            if (ImGui::MenuItem("Select in Hierarchy", nullptr, false, entity != nullptr))
-                FocusEntity(entity);
+            {
+                SceneHistoryIgnoreScope navigation;
+                if (ImGui::MenuItem("Select in Hierarchy", nullptr, false, entity != nullptr))
+                    FocusEntity(entity);
+            }
 
             ImGui::EndPopup();
         }
@@ -11425,6 +11415,7 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
         // drop ON node = parent and append at end
         if (ImGui::BeginDragDropTarget())
         {
+            SceneHistoryEditScope sceneDrop(m_sceneHistoryEditWasActive);
             if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("ENTITY_DRAG"))
             {
                 Canis::UUID droppedUUID = *static_cast<const Canis::UUID *>(payload->Data);
@@ -11468,7 +11459,8 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
                 }
             }
 
-            (void)DrawHierarchyCreateMenu(*this, *m_app, *m_scene, _entity, _refresh);
+            if (DrawHierarchyCreateMenu(*this, *m_app, *m_scene, _entity, _refresh))
+                NotifySceneChanged();
 
             if (idx >= 0 && ImGui::MenuItem("Duplicate"))
             {
@@ -11490,6 +11482,7 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
 
                 // option to tell it to generate new UUIDS
                 m_scene->LoadEntityNodes(nodes, false);
+                NotifySceneChanged();
             }
 
             if (idx >= 0 && ImGui::MenuItem("Remove"))
@@ -11503,7 +11496,10 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
                 for (auto &item : m_app->GetInspectorItemRegistry())
                 {
                     if (ImGui::MenuItem((item.name + "##").c_str()))
+                    {
                         item.Func(*m_app, *this, *_entity, m_app->GetScriptRegistry());
+                        NotifySceneChanged();
+                    }
                 }
             }
 
@@ -11536,6 +11532,7 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
 
                         if (ImGui::BeginDragDropTarget())
                         {
+                            SceneHistoryEditScope sceneDrop(m_sceneHistoryEditWasActive);
                             if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("ENTITY_DRAG"))
                             {
                                 Canis::UUID droppedUUID = *static_cast<const Canis::UUID *>(payload->Data);
@@ -11702,6 +11699,7 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
 
             if (ImGui::BeginDragDropTarget())
             {
+                SceneHistoryEditScope sceneDrop(m_sceneHistoryEditWasActive);
                 if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("ENTITY_DRAG"))
                 {
                     Canis::UUID droppedUUID = *static_cast<const Canis::UUID *>(payload->Data);
@@ -11743,6 +11741,7 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
 
             if (ImGui::BeginDragDropTarget())
             {
+                SceneHistoryEditScope sceneDrop(m_sceneHistoryEditWasActive);
                 if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("ENTITY_DRAG"))
                 {
                     Canis::UUID droppedUUID = *static_cast<const Canis::UUID *>(payload->Data);
@@ -11778,6 +11777,7 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
 
         if (ImGui::BeginDragDropTarget())
         {
+            SceneHistoryEditScope sceneDrop(m_sceneHistoryEditWasActive);
             if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("ENTITY_DRAG"))
             {
                 Canis::UUID droppedUUID = *static_cast<const Canis::UUID *>(payload->Data);
@@ -11813,7 +11813,8 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
 
         if (ImGui::BeginPopupContextItem("hierarchy_root_context"))
         {
-            (void)DrawHierarchyCreateMenu(*this, *m_app, *m_scene, nullptr, refresh);
+            if (DrawHierarchyCreateMenu(*this, *m_app, *m_scene, nullptr, refresh))
+                NotifySceneChanged();
             ImGui::EndPopup();
         }
         // -----------------------------------------------------
@@ -11911,29 +11912,32 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
         {
             Entity &entity = *entities[m_index];
 
-            ImGui::Text("active:");
-            ImGui::SameLine();
-            ImGui::Checkbox("##entity_active", &entity.Active());
-            ImGui::SameLine();
-            ImGui::Checkbox("Locked", &entity.EditorLocked());
-            ImGui::Text("name: ");
-            ImGui::SameLine();
-            ImGui::InputText("##name", &entity.GetName());
-            ImGui::Text("tag:  ");
-            ImGui::SameLine();
-            const auto& projectTags = Canis::GetProjectConfig().tags;
-            const std::string& tagName = entity.GetTagName();
-            if (ImGui::BeginCombo("##tag", entity.GetTag() == NoTag ? "None" : tagName.c_str()))
             {
-                if (ImGui::Selectable("None", entity.GetTag() == NoTag))
-                    entity.GetTag() = NoTag;
-                for (const std::string& tag : projectTags)
-                    if (ImGui::Selectable(tag.c_str(), entity.HasTag(tag)))
-                        entity.SetTag(tag);
-                if (entity.GetTag() != NoTag &&
-                    std::find(projectTags.begin(), projectTags.end(), entity.GetTagName()) == projectTags.end())
-                    ImGui::TextDisabled("Current tag is not in Project Settings.");
-                ImGui::EndCombo();
+                SceneHistoryEditScope sceneProperties(m_sceneHistoryEditWasActive);
+                ImGui::Text("active:");
+                ImGui::SameLine();
+                ImGui::Checkbox("##entity_active", &entity.Active());
+                ImGui::SameLine();
+                ImGui::Checkbox("Locked", &entity.EditorLocked());
+                ImGui::Text("name: ");
+                ImGui::SameLine();
+                ImGui::InputText("##name", &entity.GetName());
+                ImGui::Text("tag:  ");
+                ImGui::SameLine();
+                const auto& projectTags = Canis::GetProjectConfig().tags;
+                const std::string& tagName = entity.GetTagName();
+                if (ImGui::BeginCombo("##tag", entity.GetTag() == NoTag ? "None" : tagName.c_str()))
+                {
+                    if (ImGui::Selectable("None", entity.GetTag() == NoTag))
+                        entity.GetTag() = NoTag;
+                    for (const std::string& tag : projectTags)
+                        if (ImGui::Selectable(tag.c_str(), entity.HasTag(tag)))
+                            entity.SetTag(tag);
+                    if (entity.GetTag() != NoTag &&
+                        std::find(projectTags.begin(), projectTags.end(), entity.GetTagName()) == projectTags.end())
+                        ImGui::TextDisabled("Current tag is not in Project Settings.");
+                    ImGui::EndCombo();
+                }
             }
 
             for (ScriptConf &conf : m_app->GetScriptRegistry())
@@ -11962,6 +11966,7 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
                         if (ImGui::MenuItem(std::string("Remove##" + conf.name).c_str()))
                         {
                             conf.Remove(entity);
+                            NotifySceneChanged();
                             open = false;
                         }
 
@@ -11969,7 +11974,10 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
                     }
 
                     if (open)
+                    {
+                        SceneHistoryEditScope sceneProperties(m_sceneHistoryEditWasActive);
                         conf.DrawInspector(*this, entity, conf);
+                    }
                 }
             }
 
@@ -13670,6 +13678,7 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
 
                 Animator &animator = selectedEntity->GetComponent<Animator>();
                 animator.controller = MakeAnimatorControllerAssetHandleFromPath(controllerPath);
+                NotifySceneChanged();
                 animator.playing = true;
                 boundAnimator = &animator;
             }
@@ -14537,6 +14546,7 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
 
                 AnimationPlayer &player = rootEntity->GetComponent<AnimationPlayer>();
                 player.clip = MakeAnimationClipAssetHandleFromPath(m_animationClipStatePath);
+                NotifySceneChanged();
             }
         }
 
@@ -15216,6 +15226,7 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
                     if (conf.name == componentName)
                     {
                         conf.Add(entity);
+                        NotifySceneChanged();
                         ImGui::CloseCurrentPopup();
                         m_addComponentSelection = 0;
                         m_addComponentSearch.clear();
@@ -15327,6 +15338,7 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
             ImGui::End();
             return;
         }
+        SceneHistoryEditScope sceneProperties(m_sceneHistoryEditWasActive);
         Color background = m_window->GetClearColor();
         ImGui::ColorEdit4("Background##", &background.r);
 
@@ -15370,7 +15382,10 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
 
         ImGui::Button(skyboxLabel.c_str(), ImVec2(180, 0));
         if (ImGui::IsItemHovered() && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
+        {
             m_scene->SetEnvironmentSkyboxUUID(UUID(0));
+            NotifySceneChanged();
+        }
 
         if (ImGui::BeginDragDropTarget())
         {
@@ -15390,7 +15405,10 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
         if (ImGui::BeginPopupContextItem("skybox_env_ctx"))
         {
             if (ImGui::MenuItem("Clear"))
+            {
                 m_scene->SetEnvironmentSkyboxUUID(UUID(0));
+                NotifySceneChanged();
+            }
             ImGui::EndPopup();
         }
 
@@ -15413,7 +15431,10 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
 
         ImGui::Button(postProcessLabel.c_str(), ImVec2(180, 0));
         if (ImGui::IsItemHovered() && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
+        {
             m_scene->SetEnvironmentPostProcessUUID(UUID(0));
+            NotifySceneChanged();
+        }
 
         if (ImGui::BeginDragDropTarget())
         {
@@ -15433,7 +15454,10 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
         if (ImGui::BeginPopupContextItem("postprocess_env_ctx"))
         {
             if (ImGui::MenuItem("Clear"))
+            {
                 m_scene->SetEnvironmentPostProcessUUID(UUID(0));
+                NotifySceneChanged();
+            }
             ImGui::EndPopup();
         }
 
@@ -17503,13 +17527,16 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
             m_consoleLastEntryId = 0u;
         }
 
-        ImGui::Checkbox(("Log (" + std::to_string(logCount) + ")").c_str(), &m_consoleShowLogs);
+        // These widgets edit the console view, never serialized scene data.
+        // Register their IDs even on idle frames so both active edits and release
+        // events are excluded from the end-of-frame scene history capture.
+        ImGui::Checkbox(("Log (" + std::to_string(logCount) + ")###ConsoleLog").c_str(), &m_consoleShowLogs);
         ImGui::SameLine();
-        ImGui::Checkbox(("Warning (" + std::to_string(warningCount) + ")").c_str(), &m_consoleShowWarnings);
+        ImGui::Checkbox(("Warning (" + std::to_string(warningCount) + ")###ConsoleWarning").c_str(), &m_consoleShowWarnings);
         ImGui::SameLine();
-        ImGui::Checkbox(("Error (" + std::to_string(errorCount) + ")").c_str(), &m_consoleShowErrors);
+        ImGui::Checkbox(("Error (" + std::to_string(errorCount) + ")###ConsoleError").c_str(), &m_consoleShowErrors);
         ImGui::SameLine();
-        ImGui::Checkbox(("Fatal (" + std::to_string(fatalCount) + ")").c_str(), &m_consoleShowFatal);
+        ImGui::Checkbox(("Fatal (" + std::to_string(fatalCount) + ")###ConsoleFatal").c_str(), &m_consoleShowFatal);
         ImGui::SameLine();
         ImGui::Checkbox("Auto-scroll", &m_consoleAutoScroll);
         ImGui::SameLine();

@@ -23,6 +23,13 @@ public static partial class Program
     internal static partial double TweenExchange(int action, double x, double y, double z, double w);
 
     [JSExport]
+    public static bool UIAction(string payload)
+    {
+        try { return ComponentStore.InvokeUIAction(payload); }
+        catch (Exception error) { Log.ReportException(error, "C# UI action"); return false; }
+    }
+
+    [JSExport]
     public static string Command(int operation, double delta)
     {
         try

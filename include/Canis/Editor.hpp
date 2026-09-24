@@ -88,6 +88,8 @@ namespace Canis
         void StopPlayMode();
         void SetVRPlayError(const std::string &_error) { m_vrPlayError = _error; }
         void FocusEntity(Canis::Entity* _entity);
+        // Call after a scene command that does not use an edited property widget.
+        void NotifySceneChanged() { m_sceneHistoryEditWasActive = true; }
         void RevealAsset(const std::string& path) { m_selectedAssetPath=path;m_assetSearch=std::filesystem::path(path).filename().string();m_showAssetsPanel=true; }
         bool BakeBlockoutEntity(Canis::Entity* _entity);
         void RebuildPrefabInstance(Canis::Entity* _entity);

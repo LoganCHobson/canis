@@ -86,6 +86,8 @@ public static unsafe class EntryPoint
                     if (running) foreach (var instance in instances)
                         if (!instance.Failed) Invoke(instance, s => s.Update((float)command->Delta));
                     return 0;
+                case 12:
+                    return ComponentStore.InvokeUIAction(Encoding.UTF8.GetString((byte*)command->Payload, command->Length)) ? 1 : 0;
                 case 11:
                     Canis.Tweening.TweenCallbacks.Invoke((int)command->Delta, command->Length);
                     return 0;

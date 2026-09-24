@@ -4,6 +4,7 @@
 #include <Canis/Window.hpp>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include "../src/EditorHistoryEvent.hpp"
 #include <SDL3/SDL.h>
 #include <filesystem>
 #include <fstream>
@@ -50,6 +51,62 @@ namespace Canis
                 ImGui::Begin("SceneTabsTest"); editor.DrawSceneTabs(); ImGui::End();
                 ImGui::Render();
             };
+
+            setup();
+            // A changed sentinel distinguishes "no capture" from taking an
+            // expensive snapshot and then discarding it as identical.
+            app.scene.GetEntities()[0]->SetName("Scene edit sentinel");
+            const auto originalHistory = editor.m_sceneHistoryCurrentState.sceneYaml;
+            ImGui::NewFrame();
+            editor.BeginSceneHistoryFrame();
+            ImGui::Begin("Asset search");
+            const auto searchId = ImGui::GetID("Search");
+            ImGui::SetActiveID(searchId, ImGui::GetCurrentWindow());
+            ImGui::MarkItemEdited(searchId);
+            ImGui::ClearActiveID();
+            ImGui::End();
+            ImGui::Begin("Inspector");
+            { SceneHistoryEditScope properties(editor.m_sceneHistoryEditWasActive); }
+            ImGui::End();
+            editor.EndSceneHistoryFrame();
+            Check(editor.m_sceneHistoryCurrentState.sceneYaml == originalHistory &&
+                  editor.m_sceneUndoStack.empty(), "Unrelated edit captured the scene");
+            // Explicit scene commands capture once and remain undoable.
+            editor.NotifySceneChanged();
+            editor.EndSceneHistoryFrame();
+            Check(editor.m_sceneUndoStack.size() == 1 &&
+                  editor.m_sceneHistoryCurrentState.sceneYaml != originalHistory,
+                  "Scene command did not record history");
+            editor.EndSceneHistoryFrame();
+            Check(editor.m_sceneUndoStack.size() == 1, "Idle end frame duplicated undo");
+            ImGui::Render();
+            editor.UndoSceneEdit();
+            Check(app.scene.GetEntities()[0]->GetName() == "Original", "Scene command undo failed");
+            editor.RedoSceneEdit();
+            Check(app.scene.GetEntities()[0]->GetName() == "Scene edit sentinel", "Scene command redo failed");
+
+            ImGui::NewFrame();
+            editor.BeginSceneHistoryFrame();
+            ImGui::Begin("Inspector");
+            const auto propertyId = ImGui::GetID("Name");
+            const auto beforeProperty = editor.m_sceneHistoryCurrentState.sceneYaml;
+            {
+                SceneHistoryEditScope properties(editor.m_sceneHistoryEditWasActive);
+                ImGui::SetActiveID(propertyId, ImGui::GetCurrentWindow());
+                app.scene.GetEntities()[0]->SetName("Property edit");
+                ImGui::MarkItemEdited(propertyId);
+            }
+            editor.EndSceneHistoryFrame();
+            Check(editor.m_sceneHistoryCurrentState.sceneYaml == beforeProperty,
+                  "Property edit captured before the interaction finished");
+            ImGui::ClearActiveID();
+            editor.EndSceneHistoryFrame();
+            Check(editor.m_sceneUndoStack.size() == 2,
+                  "Completed property edit did not create one undo entry");
+            ImGui::End(); ImGui::Render();
+            editor.UndoSceneEdit();
+            Check(app.scene.GetEntities()[0]->GetName() == "Scene edit sentinel",
+                  "Property edit undo failed");
 
             setup();
             editor.SwitchSceneTab(0);

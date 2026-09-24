@@ -9,7 +9,7 @@ namespace Canis;
 // Stores belong to one active gameplay generation. Clear before unloading its ALC.
 internal static class ComponentStore
 {
-    internal sealed record Description(Type Type,string Id,string[] Aliases,FieldInfo[] Fields);
+    internal sealed record Description(Type Type,string Id,string[] Aliases,FieldInfo[] Fields,MethodInfo[] UIActions);
     private sealed class State(Component component) {internal Component Component=component;internal bool Awoken,Active,Started,Failed,Restored;internal JsonObject Authored=[];}
     private static Dictionary<string,Description> types=[];
     private static readonly Dictionary<(ulong,ulong),State> instances=[];
@@ -35,10 +35,41 @@ internal static class ComponentStore
             foreach(var f in t.GetFields(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.DeclaredOnly))
                 if(!f.IsStatic && !f.IsInitOnly && f.GetCustomAttribute<NonSerializedAttribute>() is null && (f.IsPublic || f.IsDefined(typeof(SerializeFieldAttribute))))yield return f;
     }
+    // A button can call user-authored synchronous public void methods with no arguments.
+    // Exclude lifecycle hooks, accessors and engine methods from both discovery and dispatch.
+    private static MethodInfo[] UIActions(Type type)
+    {
+        if (!typeof(ScriptableEntity).IsAssignableFrom(type)) return [];
+        var lifecycle = new HashSet<string> { "Awake", "OnCreate", "OnEnable", "Start", "Update", "OnDisable", "OnDestroy", "Destroy" };
+        return type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Where(m => m.ReturnType == typeof(void) && m.GetParameters().Length == 0 &&
+                !m.IsSpecialName && !m.ContainsGenericParameters && !lifecycle.Contains(m.Name) &&
+                m.DeclaringType?.Assembly != typeof(Component).Assembly &&
+                !m.IsDefined(typeof(System.Runtime.CompilerServices.AsyncStateMachineAttribute)))
+            .GroupBy(m => m.Name, StringComparer.Ordinal).Where(g => g.Count() == 1)
+            .Select(g => g.Single()).OrderBy(m => m.Name, StringComparer.Ordinal).ToArray();
+    }
+
+    internal static bool InvokeUIAction(string payload)
+    {
+        if (!Running) return false;
+        using var request = JsonDocument.Parse(payload);
+        ulong token = ulong.Parse(request.RootElement.GetProperty("token").GetString()!);
+        string name = request.RootElement.GetProperty("action").GetString()!;
+        var state = instances.FirstOrDefault(pair => pair.Key.Item2 == token).Value;
+        if (state == null || state.Failed || !state.Started ||
+            state.Component is not ScriptableEntity script || !script.IsActiveAndEnabled) return false;
+        if (!types.TryGetValue(Id(script.GetType()), out var description)) return false;
+        var method = description.UIActions.FirstOrDefault(m => m.Name == name);
+        if (method == null) return false;
+        Try(state, method.CreateDelegate<Action>(script));
+        return !state.Failed;
+    }
+
     internal static Description[] Describe(IEnumerable<Type> all)
     {
         var result=all.Where(t=>t.IsSubclassOf(typeof(Component)) && !typeof(NativeComponent).IsAssignableFrom(t) && !t.IsAbstract).OrderBy(t=>t.FullName,StringComparer.Ordinal)
-            .Select(t=>new Description(t,Id(t),Aliases(t),Fields(t).ToArray())).ToArray();
+            .Select(t=>new Description(t,Id(t),Aliases(t),Fields(t).ToArray(),UIActions(t))).ToArray();
         var ids=new HashSet<string>();
         foreach(var d in result) {
             if(!d.Type.IsPublic || d.Type.ContainsGenericParameters || d.Type.GetConstructor(Type.EmptyTypes) is null)throw new InvalidOperationException($"{d.Type} needs a public parameterless constructor.");
@@ -99,7 +130,7 @@ internal static class ComponentStore
             NativeBridge.MetadataMode=true;try {defaults=Activator.CreateInstance(d.Type)!;}finally{NativeBridge.MetadataMode=false;}
             var fields=new JsonArray();
             foreach(var f in d.Fields)fields.Add(new JsonObject{{"name",f.Name},{"aliases",new JsonArray(f.GetCustomAttributes<FormerlySerializedAsAttribute>().Select(a=>(JsonNode?)JsonValue.Create(a.Name)).ToArray())},{"kind",Kind(f.FieldType)},{"assetType",typeof(Asset).IsAssignableFrom(f.FieldType)?Asset.Kind(f.FieldType):""},{"componentType",typeof(Component).IsAssignableFrom(f.FieldType)?(typeof(NativeComponent).IsAssignableFrom(f.FieldType)?"Canis::"+f.FieldType.Name:Id(f.FieldType)):""},{"header",f.GetCustomAttribute<HeaderAttribute>()?.Text??""},{"tooltip",f.GetCustomAttribute<TooltipAttribute>()?.Text??""},{"default",Encode(f.GetValue(defaults),f.FieldType)},{"options",new JsonArray((f.FieldType.IsEnum?Enum.GetNames(f.FieldType):[]).Select(n=>(JsonNode?)JsonValue.Create(n)).ToArray())}});
-            list.Add(new JsonObject{{"id",d.Id},{"name",d.Type.FullName},{"source",Source(d.Type)},{"assignableTo",new JsonArray(ReferenceTypes(d.Type).Select(a=>(JsonNode?)JsonValue.Create(a)).ToArray())},{"aliases",new JsonArray(d.Aliases.Select(a=>(JsonNode?)JsonValue.Create(a)).ToArray())},{"fields",fields}});
+            list.Add(new JsonObject{{"id",d.Id},{"name",d.Type.FullName},{"source",Source(d.Type)},{"assignableTo",new JsonArray(ReferenceTypes(d.Type).Select(a=>(JsonNode?)JsonValue.Create(a)).ToArray())},{"aliases",new JsonArray(d.Aliases.Select(a=>(JsonNode?)JsonValue.Create(a)).ToArray())},{"uiActions",new JsonArray(d.UIActions.Select(m => (JsonNode?)JsonValue.Create(m.Name)).ToArray())},{"fields",fields}});
         }
         return list.ToJsonString();
     }

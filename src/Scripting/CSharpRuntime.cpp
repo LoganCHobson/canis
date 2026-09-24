@@ -1,4 +1,5 @@
 #include <Canis/External/tinygltf/json.hpp>
+#include <Canis/External/tinygltf/json.hpp>
 #include <cstdio>
 #include <deque>
 #include <Canis/Scripting/CSharpRuntime.hpp>
@@ -248,6 +249,11 @@ CSharpRuntime::CSharpRuntime(const std::filesystem::path& assets, const std::fil
     impl->cache = std::filesystem::absolute(cache) / ("session-" + std::to_string(SDL_GetTicksNS()));
 }
 CSharpRuntime::~CSharpRuntime() = default;
+bool CSharpRuntime::RunUIAction(uint64_t attachment, const std::string& action) {
+    if (!impl->playing) return false;
+    const auto payload = nlohmann::json({{"token", std::to_string(attachment)}, {"action", action}}).dump();
+    return impl->Call(12, payload.data(), static_cast<int>(payload.size())) == 1;
+}
 void CSharpRuntime::RunTween(int registration,int action) {
     if(impl->Call(11,nullptr,action,registration)!=0)throw std::runtime_error("Managed tween callback failed");
 }

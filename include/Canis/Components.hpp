@@ -63,6 +63,9 @@ namespace Canis
         unsigned int scaleMode = CanvasScaleMode::SCALE_WITH_SCREEN_WIDTH;
         Vector2 screenSize = Vector2(1280.0f, 800.0f);
         bool receivesEvents = true;
+        bool navigationEnabled = true;
+        unsigned int navigateAction = 0;
+        unsigned int confirmAction = 0;
         float interactionDistance = 3.0f;
     };
 
@@ -1607,6 +1610,12 @@ namespace Canis
         void Create() {}
 
         bool active = true;
+        bool defaultSelected = false;
+        Entity up = nullptr;
+        Entity down = nullptr;
+        Entity left = nullptr;
+        Entity right = nullptr;
+        Entity hitRect = nullptr; // Optional separate pointer area; visuals stay on this button.
         Entity targetEntity = nullptr;
         std::string targetScript = "";
         std::string actionName = "";

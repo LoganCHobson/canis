@@ -273,6 +273,13 @@ namespace Canis
         if (scene == nullptr || scene->app == nullptr || inputManager == nullptr || window == nullptr)
             return;
 
+        const bool wasEditingText = m_focusedInputField != nullptr;
+        if (inputManager->mouseRel != Vector2(0.0f) || inputManager->JustLeftClicked())
+        {
+            m_navigationFocus = false;
+            m_navigationPressedButton = nullptr;
+        }
+
         auto setFocusedInputField = [&](Entity* _entity) -> void
         {
             if (m_focusedInputField == _entity)
@@ -392,7 +399,7 @@ namespace Canis
         {
             (void)entityHandle;
             Entity* entity = button.entity;
-            if (entity == nullptr || !button.active)
+            if (entity == nullptr)
                 continue;
 
             if (button.baseValuesSaved == false)
@@ -406,7 +413,7 @@ namespace Canis
                     button.baseColor = entity->GetComponent<Text>().color;
             }
 
-            const bool visible = rect.IsActiveInHierarchy();
+            const bool visible = button.active && rect.IsActiveInHierarchy();
             button.hovered = false;
             button.pressed = visible && (m_pressedButton == entity) && inputManager->GetLeftClick();
             ApplyButtonVisual(*entity, button, rect);
@@ -506,8 +513,11 @@ namespace Canis
             for (auto [entityHandle, rect, button] : buttonView.each())
             {
                 (void)entityHandle;
-                if (button.active)
-                    evaluateRectEntity(button.entity, rect, hoveredButtonDepth, hoveredButton);
+                if (!button.active || !rect.IsActiveInHierarchy()) continue;
+                auto* hitEntity = button.hitRect.TryGet();
+                auto& hitRect = hitEntity && hitEntity->HasComponent<RectTransform>()
+                    ? hitEntity->GetComponent<RectTransform>() : rect;
+                evaluateRectEntity(button.entity, hitRect, hoveredButtonDepth, hoveredButton);
             }
 
             auto inputFieldView = _registry.view<RectTransform, UIInputField>();
@@ -548,11 +558,13 @@ namespace Canis
             }
         }
 
+        Entity navigationPointerButton = hoveredButton;
         if (hoveredButton != nullptr && hoveredButton->HasComponents<RectTransform, UIButton>())
         {
             UIButton& button = hoveredButton->GetComponent<UIButton>();
             RectTransform& rect = hoveredButton->GetComponent<RectTransform>();
-            button.hovered = true;
+            button.hovered = !m_navigationFocus;
+            if (!m_navigationFocus) m_selectedButton = hoveredButton;
             ApplyButtonVisual(*hoveredButton, button, rect);
         }
 
@@ -684,6 +696,128 @@ namespace Canis
                 setFocusedInputField(nullptr);
             else
                 RefreshInputFieldDisplay(inputField);
+        }
+        // Navigation shares the existing button visuals and action dispatch path.
+        // World canvases remain pointer-driven while the mouse is captured.
+        auto selectable = [&](Entity candidate) {
+            if (!candidate || !candidate->Active() ||
+                !candidate->HasComponents<RectTransform, UIButton>()) return false;
+            const auto& rect = candidate->GetComponent<RectTransform>();
+            const auto* canvas = rect.GetCanvas();
+            return candidate->GetComponent<UIButton>().active && rect.IsActiveInHierarchy() &&
+                (canvas == nullptr || (canvas->active && canvas->receivesEvents));
+        };
+        if (!selectable(m_selectedButton)) m_selectedButton = nullptr;
+        if (!selectable(m_navigationPressedButton)) m_navigationPressedButton = nullptr;
+        if (!inputManager->active || window->IsMouseLocked() || wasEditingText || m_focusedInputField || m_dragSource)
+        {
+            m_navigationPressedButton = nullptr;
+            return;
+        }
+        bool up = inputManager->JustPressedKey(Key::UP) || inputManager->JustPressedButton(ControllerButton::DPAD_UP);
+        bool down = inputManager->JustPressedKey(Key::DOWN) || inputManager->JustPressedButton(ControllerButton::DPAD_DOWN);
+        bool left = inputManager->JustPressedKey(Key::LEFT) || inputManager->JustPressedButton(ControllerButton::DPAD_LEFT);
+        bool right = inputManager->JustPressedKey(Key::RIGHT) || inputManager->JustPressedButton(ControllerButton::DPAD_RIGHT);
+        bool confirm = inputManager->JustPressedKey(Key::RETURN) || inputManager->JustPressedKey(Key::KP_ENTER) ||
+            inputManager->JustPressedKey(Key::SPACE) || inputManager->JustPressedButton(ControllerButton::A);
+        bool held = inputManager->GetKey(Key::RETURN) || inputManager->GetKey(Key::KP_ENTER) ||
+            inputManager->GetKey(Key::SPACE) || inputManager->GetButton(ControllerButton::A);
+        bool released = inputManager->JustReleasedKey(Key::RETURN) || inputManager->JustReleasedKey(Key::KP_ENTER) ||
+            inputManager->JustReleasedKey(Key::SPACE) || inputManager->JustReleasedButton(ControllerButton::A);
+        Entity defaultButton = nullptr;
+        if (!m_selectedButton)
+            for (auto [handle, rect, button] : _registry.view<RectTransform, UIButton>().each())
+                if (button.defaultSelected && selectable(button.entity)) { defaultButton = button.entity; break; }
+        Entity inputButton = m_selectedButton ? m_selectedButton : defaultButton;
+        const Canvas* canvas = inputButton ? inputButton->GetComponent<RectTransform>().GetCanvas() : nullptr;
+        Entity canvasEntity = canvas ? canvas->entity : nullptr;
+        if (canvasEntity != m_navigationCanvas)
+        {
+            m_navigationCanvas = canvasEntity;
+            m_navigationDirection = Vector2(0.0f);
+            m_navigationRepeat = 0.0f;
+        }
+        if (canvas && !canvas->navigationEnabled)
+        {
+            m_navigationPressedButton = nullptr;
+            m_navigationDirection = Vector2(0.0f);
+            return;
+        }
+        if (canvas && canvas->navigateAction != 0)
+        {
+            if (!m_selectedButton) m_selectedButton = defaultButton;
+            const auto value = inputManager->Action(ActionId{canvas->navigateAction}).value;
+            const Vector2 direction(std::abs(value.x) > .45f ? (value.x > 0 ? 1.f : -1.f) : 0.f,
+                                    std::abs(value.y) > .45f ? (value.y > 0 ? 1.f : -1.f) : 0.f);
+            bool step = direction != Vector2(0.0f) && direction != m_navigationDirection;
+            if (direction == Vector2(0.0f)) m_navigationRepeat = 0;
+            else if (step) m_navigationRepeat = .35f;
+            else { m_navigationRepeat -= std::max(0.f, _deltaTime); if (m_navigationRepeat <= 0) { step = true; m_navigationRepeat = .12f; } }
+            m_navigationDirection = direction;
+            up = step && direction.y > 0; down = step && direction.y < 0;
+            left = step && direction.x < 0; right = step && direction.x > 0;
+        }
+        if (canvas && canvas->confirmAction != 0)
+        {
+            const auto action = inputManager->Action(ActionId{canvas->confirmAction});
+            confirm = action.pressed; held = action.down; released = action.released;
+            if (action.canceled) { m_navigationPressedButton = nullptr; released = false; }
+        }
+        if (up || down || left || right || confirm) m_navigationFocus = true;
+        if (!m_navigationFocus) return;
+        bool acquired = false;
+        if (!m_selectedButton)
+        {
+            for (auto [handle, rect, button] : _registry.view<RectTransform, UIButton>().each())
+            {
+                if (button.defaultSelected && selectable(button.entity))
+                {
+                    m_selectedButton = button.entity;
+                    acquired = true;
+                    break;
+                }
+            }
+        }
+        if (!m_selectedButton) return;
+        auto& selected = m_selectedButton->GetComponent<UIButton>();
+        Entity next = up ? selected.up : down ? selected.down : left ? selected.left : right ? selected.right : Entity(nullptr);
+        // Follow the same direction through disabled controls, with a bounded
+        // traversal so a disabled cycle or stale link cannot trap navigation.
+        for (std::size_t visited = 0; next && !selectable(next) && visited < _registry.view<UIButton>().size(); ++visited)
+        {
+            if (!next->HasComponent<UIButton>()) { next = nullptr; break; }
+            const auto& link = next->GetComponent<UIButton>();
+            next = up ? link.up : down ? link.down : left ? link.left : link.right;
+        }
+        if (!acquired && selectable(next) && next != m_selectedButton)
+        {
+            m_selectedButton = next;
+            m_navigationPressedButton = nullptr;
+        }
+        if (confirm) m_navigationPressedButton = m_selectedButton;
+        if (navigationPointerButton && navigationPointerButton != m_selectedButton &&
+            navigationPointerButton->HasComponents<UIButton, RectTransform>())
+        {
+            auto& hovered = navigationPointerButton->GetComponent<UIButton>();
+            hovered.hovered = false;
+            ApplyButtonVisual(*navigationPointerButton, hovered, navigationPointerButton->GetComponent<RectTransform>());
+        }
+        auto& button = m_selectedButton->GetComponent<UIButton>();
+        button.hovered = true;
+        button.pressed = m_navigationPressedButton == m_selectedButton && held;
+        ApplyButtonVisual(*m_selectedButton, button, m_selectedButton->GetComponent<RectTransform>());
+        if (released && !held && m_navigationPressedButton)
+        {
+            Entity source = m_navigationPressedButton;
+            m_navigationPressedButton = nullptr;
+            if (source != m_selectedButton) return;
+            Entity receiver = button.targetEntity != nullptr ? button.targetEntity : source;
+            if (!receiver) return;
+            UIActionContext context = {};
+            context.sourceEntity = source;
+            context.targetEntity = receiver;
+            context.pointerPosition = source->GetComponent<RectTransform>().GetPosition();
+            scene->app->DispatchUIAction(*receiver, button.targetScript, button.actionName, context);
         }
     }
 }
