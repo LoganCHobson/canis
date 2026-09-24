@@ -8,6 +8,7 @@
 #include <Canis/Window.hpp>
 #include <Canis/ECS/Systems/UIInteractionSystem.hpp>
 #include <iostream>
+#include <SDL3/SDL.h>
 #include <stdexcept>
 using namespace Canis;
 static void Check(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
@@ -138,6 +139,44 @@ int main()
     input.Actions().DisableMap({10}); mappedFrame();
     Check(managedClicks == 4, "Canceled action incorrectly activated a button");
     app.scene.managedUIAction = {};
+
+    // UIInputField owns SDL text entry for native and managed focus requests.
+    auto fieldEntity = app.scene.CreateEntity("Editable text");
+    fieldEntity.AddComponent<RectTransform>()->position = Vector2(1000);
+    auto& field = *fieldEntity.AddComponent<UIInputField>();
+    field.maxLength = 3;
+    Check(system.FocusInputField(fieldEntity), "Programmatic field focus failed");
+    Check(field.focused && SDL_TextInputActive(static_cast<SDL_Window*>(window.GetSDLWindow())), "Field did not begin platform text input");
+    UIInteractionSystem::InsertInputText(field, "aé😀z");
+    Check(field.text == "aé😀", "Character limit split a UTF-8 character");
+    UIInteractionSystem::BackspaceInputText(field);
+    Check(field.text == "aé", "Backspace corrupted UTF-8");
+    UIInteractionSystem::SetInputText(field, "");
+    field.allowedCharacters = "abc";
+    UIInteractionSystem::InsertInputText(field, "a!b\nc");
+    Check(field.text == "abc", "Input validation did not filter pasted text");
+    field.active = false;
+    frame();
+    Check(!field.focused && !SDL_TextInputActive(static_cast<SDL_Window*>(window.GetSDLWindow())), "Disabled field retained text focus");
+    field.active = true;
+    Check(system.FocusInputField(fieldEntity), "Field did not regain focus");
+    key(Key::RETURN, true);
+    Check(!field.focused, "Enter did not submit the input field");
+    key(Key::RETURN, false);
+    field.submitOnEnter = false;
+    Check(system.FocusInputField(fieldEntity), "Managed-submit field did not focus");
+    key(Key::RETURN, true);
+    Check(field.focused, "Managed-submit field consumed Enter");
+    key(Key::RETURN, false);
+    fieldEntity.Destroy();
+    frame();
+    Check(!SDL_TextInputActive(static_cast<SDL_Window*>(window.GetSDLWindow())), "Destroyed field left platform text input active");
+    auto otherField = app.scene.CreateEntity("Unload text focus");
+    otherField.AddComponent<RectTransform>()->position = Vector2(1000);
+    otherField.AddComponent<UIInputField>();
+    Check(system.FocusInputField(otherField), "Second field did not focus");
+    system.OnDestroy();
+    Check(!SDL_TextInputActive(static_cast<SDL_Window*>(window.GetSDLWindow())), "System teardown left text input active");
 
     // Scene serialization must preserve links and remap them on duplication.
     auto* conf = app.GetScriptConf("Canis::UIButton");

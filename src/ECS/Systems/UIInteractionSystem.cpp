@@ -219,20 +219,6 @@ namespace Canis
             setterIt->second(valueNode, componentPtr);
         }
 
-        bool InputFieldAllowsText(const UIInputField& _inputField, const std::string& _text)
-        {
-            if (_inputField.allowedCharacters.empty())
-                return true;
-
-            for (char c : _text)
-            {
-                if (_inputField.allowedCharacters.find(c) == std::string::npos)
-                    return false;
-            }
-
-            return true;
-        }
-
         void RefreshInputFieldDisplay(UIInputField& _inputField)
         {
             Entity* displayEntity = GetInputFieldDisplayEntity(_inputField);
@@ -268,46 +254,109 @@ namespace Canis
         }
     }
 
+    bool UIInteractionSystem::FocusInputField(Entity* entity)
+    {
+        if (window == nullptr)
+            return false;
+        if (entity != nullptr)
+        {
+            if (!entity->IsValid() || !entity->Active() || !entity->HasComponents<RectTransform, UIInputField>() ||
+                !entity->GetComponent<UIInputField>().active || !entity->GetComponent<RectTransform>().IsActiveInHierarchy() ||
+                window->IsMouseLocked() || (inputManager && !inputManager->active))
+                return false;
+            const auto* canvas = entity->GetComponent<RectTransform>().GetCanvas();
+            if (canvas && (!canvas->active || !canvas->receivesEvents))
+                return false;
+        }
+        if (m_focusedInputField == entity && (entity != nullptr || !m_textInputActive))
+            return entity != nullptr;
+        if (m_focusedInputField && m_focusedInputField->HasComponent<UIInputField>())
+        {
+            auto& previous = m_focusedInputField->GetComponent<UIInputField>();
+            previous.focused = false;
+            previous.caretVisible = true;
+            previous.caretBlinkTimer = 0;
+            RefreshInputFieldDisplay(previous);
+        }
+        m_focusedInputField = nullptr;
+        if (m_textInputActive)
+            SDL_StopTextInput(static_cast<SDL_Window*>(window->GetSDLWindow()));
+        m_textInputActive = false;
+        if (entity == nullptr)
+            return false;
+        auto& field = entity->GetComponent<UIInputField>();
+        if (!SDL_StartTextInput(static_cast<SDL_Window*>(window->GetSDLWindow())))
+            return false;
+        m_focusedInputField = entity;
+        m_textInputActive = true;
+        field.focused = true;
+        field.caretVisible = true;
+        field.caretBlinkTimer = 0;
+        m_navigationPressedButton = nullptr;
+        RefreshInputFieldDisplay(field);
+        return true;
+    }
+
+    void UIInteractionSystem::InsertInputText(UIInputField& field, const std::string& text)
+    {
+        const char* cursor = text.c_str();
+        size_t remaining = text.size();
+        size_t length = SDL_utf8strlen(field.text.c_str());
+        while (remaining > 0)
+        {
+            const char* start = cursor;
+            const Uint32 codepoint = SDL_StepUTF8(&cursor, &remaining);
+            if (codepoint == SDL_INVALID_UNICODE_CODEPOINT || codepoint < 32 || codepoint == 127)
+                continue;
+            const std::string character(start, cursor - start);
+            if (!field.allowedCharacters.empty() && field.allowedCharacters.find(character) == std::string::npos)
+                continue;
+            if (field.maxLength > 0 && length >= static_cast<size_t>(field.maxLength))
+                break;
+            field.text += character;
+            ++length;
+        }
+        field.caretVisible = true;
+        field.caretBlinkTimer = 0;
+        if (field.entity && field.entity->IsValid())
+            PushInputFieldToBinding(field.entity->scene, field);
+        RefreshInputFieldDisplay(field);
+    }
+
+    void UIInteractionSystem::SetInputText(UIInputField& field, const std::string& text)
+    {
+        // Copy first so callers can pass field.text itself.
+        const std::string value = text;
+        field.text.clear();
+        InsertInputText(field, value);
+    }
+
+    void UIInteractionSystem::BackspaceInputText(UIInputField& field)
+    {
+        if (field.text.empty())
+            return;
+        size_t start = field.text.size() - 1;
+        while (start > 0 && (static_cast<unsigned char>(field.text[start]) & 0xc0) == 0x80)
+            --start;
+        field.text.erase(start);
+        if (field.entity && field.entity->IsValid())
+            PushInputFieldToBinding(field.entity->scene, field);
+        RefreshInputFieldDisplay(field);
+    }
+
     void UIInteractionSystem::Update(entt::registry &_registry, float _deltaTime)
     {
         if (scene == nullptr || scene->app == nullptr || inputManager == nullptr || window == nullptr)
             return;
 
-        const bool wasEditingText = m_focusedInputField != nullptr;
+        const bool wasEditingText = m_textInputActive;
+        if (m_textInputActive && (!m_focusedInputField || !inputManager->active))
+            FocusInputField(nullptr);
         if (inputManager->mouseRel != Vector2(0.0f) || inputManager->JustLeftClicked())
         {
             m_navigationFocus = false;
             m_navigationPressedButton = nullptr;
         }
-
-        auto setFocusedInputField = [&](Entity* _entity) -> void
-        {
-            if (m_focusedInputField == _entity)
-                return;
-
-            if (m_focusedInputField != nullptr && m_focusedInputField->HasComponent<UIInputField>())
-            {
-                UIInputField& previousField = m_focusedInputField->GetComponent<UIInputField>();
-                previousField.focused = false;
-                previousField.caretVisible = true;
-                previousField.caretBlinkTimer = 0.0f;
-                RefreshInputFieldDisplay(previousField);
-            }
-
-            m_focusedInputField = nullptr;
-            SDL_StopTextInput((SDL_Window*)window->GetSDLWindow());
-
-            if (_entity != nullptr && _entity->HasComponent<UIInputField>())
-            {
-                UIInputField& nextField = _entity->GetComponent<UIInputField>();
-                nextField.focused = true;
-                nextField.caretVisible = true;
-                nextField.caretBlinkTimer = 0.0f;
-                m_focusedInputField = _entity;
-                SDL_StartTextInput((SDL_Window*)window->GetSDLWindow());
-                RefreshInputFieldDisplay(nextField);
-            }
-        };
 
         auto resetDragSourceState = [](Entity* _entity) -> void
         {
@@ -336,7 +385,7 @@ namespace Canis
              !m_focusedInputField->GetComponent<UIInputField>().active ||
              !m_focusedInputField->GetComponent<RectTransform>().IsActiveInHierarchy()))
         {
-            setFocusedInputField(nullptr);
+            FocusInputField(nullptr);
         }
 
         if (m_dragSource != nullptr &&
@@ -391,7 +440,7 @@ namespace Canis
                 ApplyDropTargetVisual(*entity, dropTarget);
             }
 
-            setFocusedInputField(nullptr);
+            FocusInputField(nullptr);
             m_hoveredDropTarget = nullptr;
         }
 
@@ -586,7 +635,7 @@ namespace Canis
         {
             if (inputManager->JustLeftClicked())
             {
-                setFocusedInputField(hoveredInputField);
+                FocusInputField(hoveredInputField);
 
                 if (hoveredDragSource != nullptr && hoveredDragSource->HasComponents<RectTransform, UIDragSource>())
                 {
@@ -652,48 +701,20 @@ namespace Canis
         if (m_focusedInputField != nullptr && m_focusedInputField->HasComponent<UIInputField>())
         {
             UIInputField& inputField = m_focusedInputField->GetComponent<UIInputField>();
-            bool textChanged = false;
-
-            const std::string& textInput = inputManager->GetTextInput();
-            if (!textInput.empty() && InputFieldAllowsText(inputField, textInput))
-            {
-                const std::size_t available = (inputField.maxLength <= 0)
-                    ? std::string::npos
-                    : static_cast<std::size_t>(inputField.maxLength) > inputField.text.size()
-                        ? static_cast<std::size_t>(inputField.maxLength) - inputField.text.size()
-                        : 0u;
-                if (available == std::string::npos)
-                {
-                    inputField.text += textInput;
-                    textChanged = true;
-                }
-                else if (available > 0u)
-                {
-                    inputField.text += textInput.substr(0u, available);
-                    textChanged = true;
-                }
-            }
-
-            if (inputManager->JustPressedKey(Key::BACKSPACE) && !inputField.text.empty())
-            {
-                inputField.text.pop_back();
-                textChanged = true;
-            }
-
+            const auto& text = inputManager->GetTextInput();
+            if (!text.empty())
+                InsertInputText(inputField, text);
+            const bool backspace = inputField.backspaceAction != 0
+                ? inputManager->Action(ActionId{inputField.backspaceAction}).pressed
+                : inputManager->JustPressedKey(Key::BACKSPACE);
+            if (backspace)
+                BackspaceInputText(inputField);
             if (inputManager->JustPressedKey(Key::DELETE))
-            {
-                if (!inputField.text.empty())
-                {
-                    inputField.text.clear();
-                    textChanged = true;
-                }
-            }
-
-            if (textChanged)
-                PushInputFieldToBinding(*scene, inputField);
-
-            if (inputManager->JustPressedKey(Key::RETURN) || inputManager->JustPressedKey(Key::KP_ENTER))
-                setFocusedInputField(nullptr);
+                SetInputText(inputField, "");
+            if (inputField.submitOnEnter && (inputManager->JustPressedKey(Key::RETURN) || inputManager->JustPressedKey(Key::KP_ENTER)))
+                FocusInputField(nullptr);
+            else if (inputManager->JustPressedKey(Key::ESCAPE))
+                FocusInputField(nullptr);
             else
                 RefreshInputFieldDisplay(inputField);
         }

@@ -35,7 +35,7 @@ inline const std::map<std::string,std::set<std::string>> NativeSerializedFields 
     {"Canis::UIButton", {"actionName", "active", "defaultSelected", "down", "hitRect", "hoverColor", "hoverScale", "left", "pressedColor", "pressedScale", "right", "targetEntity", "targetScript", "up"}},
     {"Canis::UIDragSource", {"active", "payloadType", "payloadValue"}},
     {"Canis::UIDropTarget", {"acceptedPayloadType", "actionName", "active", "baseColor", "hoverColor", "targetEntity", "targetScript"}},
-    {"Canis::UIInputField", {"active", "allowedCharacters", "displayEntity", "focusedColor", "hoverColor", "maxLength", "placeholder", "placeholderColor", "targetEntity", "targetProperty", "targetScript", "text", "textColor"}},
+    {"Canis::UIInputField", {"active", "allowedCharacters", "backspaceAction", "displayEntity", "focusedColor", "hoverColor", "maxLength", "placeholder", "placeholderColor", "submitOnEnter", "targetEntity", "targetProperty", "targetScript", "text", "textColor"}},
 };
 inline const std::map<std::string,std::set<std::string>> NativeStringFields = {
     {"Canis::ConvexMeshCollider", {"modelPath"}},

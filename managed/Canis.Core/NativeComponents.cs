@@ -10,7 +10,7 @@ public sealed class AnimationPlayer : NativeComponent
     public float Time { get => GetField<float>("time"); set => SetField("time", value); }
 }
 
-public sealed class Animator : NativeComponent
+public sealed partial class Animator : NativeComponent
 {
     public bool Playing { get => GetField<bool>("playing"); set => SetField("playing", value); }
 }
@@ -57,7 +57,7 @@ public sealed class Camera2D : NativeComponent
 {
 }
 
-public sealed class Canvas : NativeComponent
+public sealed partial class Canvas : NativeComponent
 {
     public bool Active { get => GetField<bool>("active"); set => SetField("active", value); }
     public uint RenderMode { get => GetField<uint>("renderMode"); set => SetField("renderMode", value); }
@@ -239,15 +239,16 @@ public sealed class UIDropTarget : NativeComponent
     public Vector4 HoverColor { get => GetField<Vector4>("hoverColor"); set => SetField("hoverColor", value); }
 }
 
-public sealed class UIInputField : NativeComponent
+public sealed partial class UIInputField : NativeComponent
 {
     public bool Active { get => GetField<bool>("active"); set => SetField("active", value); }
     public string TargetScript { get => GetField<string>("targetScript"); set => SetField("targetScript", value); }
     public string TargetProperty { get => GetField<string>("targetProperty"); set => SetField("targetProperty", value); }
-    public string Text { get => GetField<string>("text"); set => SetField("text", value); }
     public string Placeholder { get => GetField<string>("placeholder"); set => SetField("placeholder", value); }
     public string AllowedCharacters { get => GetField<string>("allowedCharacters"); set => SetField("allowedCharacters", value); }
     public int MaxLength { get => GetField<int>("maxLength"); set => SetField("maxLength", value); }
+    public uint BackspaceAction { get => GetField<uint>("backspaceAction"); set => SetField("backspaceAction", value); }
+    public bool SubmitOnEnter { get => GetField<bool>("submitOnEnter"); set => SetField("submitOnEnter", value); }
     public Vector4 HoverColor { get => GetField<Vector4>("hoverColor"); set => SetField("hoverColor", value); }
     public Vector4 FocusedColor { get => GetField<Vector4>("focusedColor"); set => SetField("focusedColor", value); }
     public Vector4 TextColor { get => GetField<Vector4>("textColor"); set => SetField("textColor", value); }

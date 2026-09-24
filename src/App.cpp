@@ -1,3 +1,4 @@
+#include <Canis/PlayerPrefs.hpp>
 #include <Canis/Scripting/ManagedComponents.hpp>
 #if CANIS_CSHARP
 #include <Canis/Scripting/CSharpRuntime.hpp>
@@ -1978,6 +1979,9 @@ namespace Canis
             Debug::Log("Runtime window override: %dx%d.", startupWidth, startupHeight);
         const std::string windowTitle = GetProjectConfig().gameName.empty()
             ? std::string("Canis Game") : GetProjectConfig().gameName;
+        const char* prefsPath = std::getenv("CANIS_PLAYER_PREFS_PATH");
+        try { PlayerPrefs::Init("Canis", windowTitle, prefsPath ? prefsPath : ""); }
+        catch (const std::exception& error) { Debug::Warning("PlayerPrefs load failed: %s", error.what()); }
         WindowOptions windowOptions = {};
         if (!runtime.editorRuntimeEnabled)
         {
@@ -2718,6 +2722,8 @@ namespace Canis
             Time::Quit();
         if (runtime->gameCodeInitialized)
             GameCodeObjectShutdownFunction(&runtime->gameCodeObject, this);
+        try { PlayerPrefs::SaveToFile(); }
+        catch (const std::exception& error) { Debug::Warning("PlayerPrefs save failed: %s", error.what()); }
         scene.tweens.Clear();
         m_network.reset();
 
@@ -3628,6 +3634,8 @@ namespace Canis
                     comp["placeholder"] = inputField->placeholder;
                     comp["allowedCharacters"] = inputField->allowedCharacters;
                     comp["maxLength"] = inputField->maxLength;
+                    comp["backspaceAction"] = inputField->backspaceAction;
+                    comp["submitOnEnter"] = inputField->submitOnEnter;
                     comp["hoverColor"] = inputField->hoverColor;
                     comp["focusedColor"] = inputField->focusedColor;
                     comp["textColor"] = inputField->textColor;
@@ -3646,6 +3654,8 @@ namespace Canis
                     inputField.placeholder = comp["placeholder"].as<std::string>("");
                     inputField.allowedCharacters = comp["allowedCharacters"].as<std::string>("");
                     inputField.maxLength = comp["maxLength"].as<int>(64);
+                    inputField.backspaceAction = comp["backspaceAction"].as<unsigned int>(0);
+                    inputField.submitOnEnter = comp["submitOnEnter"].as<bool>(true);
                     inputField.hoverColor = comp["hoverColor"].as<Vector4>(Color(0.95f, 0.95f, 0.95f, 1.0f));
                     inputField.focusedColor = comp["focusedColor"].as<Vector4>(Color(1.0f));
                     inputField.textColor = comp["textColor"].as<Vector4>(Color(1.0f));
@@ -3675,6 +3685,8 @@ namespace Canis
                 DrawInspectorField(_editor, "placeholder", _conf.name.c_str(), inputField->placeholder);
                 DrawInspectorField(_editor, "allowedCharacters", _conf.name.c_str(), inputField->allowedCharacters);
                 DrawInspectorField(_editor, "maxLength", _conf.name.c_str(), inputField->maxLength);
+                DrawInspectorField(_editor, "backspaceAction", _conf.name.c_str(), inputField->backspaceAction);
+                DrawInspectorField(_editor, "submitOnEnter", _conf.name.c_str(), inputField->submitOnEnter);
                 DrawInspectorColorField("hoverColor", _conf.name.c_str(), inputField->hoverColor);
                 DrawInspectorColorField("focusedColor", _conf.name.c_str(), inputField->focusedColor);
                 DrawInspectorColorField("textColor", _conf.name.c_str(), inputField->textColor);

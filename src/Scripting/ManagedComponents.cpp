@@ -212,6 +212,52 @@ void DrawManagedInspector(Editor& editor, Entity& entity) {
                         else if(kind=="int"){int v=value.is_number()?value.get<int>():0;changed=ImGui::InputInt("##value",&v);value=v;}
                         else if(kind=="float" || kind=="double"){double v=value.is_number()?value.get<double>():0;changed=ImGui::InputDouble("##value",&v);value=v;}
                         else if(kind=="enum"){std::string v=value.is_string()?value.get<std::string>():"";if(ImGui::BeginCombo("##value",v.c_str())){for(auto& option:field["options"]){auto text=option.get<std::string>();if(ImGui::Selectable(text.c_str(),text==v)){value=text;changed=true;}}ImGui::EndCombo();}}
+                        else if (kind == "color" || kind == "color-array")
+                        {
+                            auto editColor = [](const char* label, ManagedJson& color)
+                            {
+                                float rgba[4] = {1, 1, 1, 1};
+                                for (int channel = 0; channel < 4; ++channel)
+                                {
+                                    if (color.is_array() && channel < color.size() && color[channel].is_number())
+                                        rgba[channel] = color[channel].get<float>();
+                                }
+                                if (!ImGui::ColorEdit4(label, rgba, ImGuiColorEditFlags_AlphaBar))
+                                    return false;
+                                color = ManagedJson::array({rgba[0], rgba[1], rgba[2], rgba[3]});
+                                return true;
+                            };
+                            if (kind == "color")
+                                changed = editColor("##value", value);
+                            else
+                            {
+                                if (!value.is_array())
+                                    value = ManagedJson::array();
+                                ImGui::Text("%zu colors", value.size());
+                                for (size_t index = 0; index < value.size();)
+                                {
+                                    ImGui::PushID(static_cast<int>(index));
+                                    ImGui::SetNextItemWidth(-1);
+                                    changed |= editColor("##color", value[index]);
+                                    const bool remove = ImGui::SmallButton("Remove");
+                                    ImGui::SameLine();
+                                    ImGui::TextDisabled("Color %zu", index);
+                                    ImGui::PopID();
+                                    if (remove)
+                                    {
+                                        value.erase(value.begin() + index);
+                                        changed = true;
+                                    }
+                                    else
+                                        ++index;
+                                }
+                                if (ImGui::Button("Add color"))
+                                {
+                                    value.push_back(ManagedJson::array({1.f, 1.f, 1.f, 1.f}));
+                                    changed = true;
+                                }
+                            }
+                        }
                         else if(kind=="vector3" || kind=="vector4" || kind=="quaternion"){float v[4]={0,0,0,kind=="quaternion"?1.f:0.f};int n=kind=="vector3"?3:4;for(int j=0;j<n && value.is_array() && j<value.size();++j)v[j]=value[j].get<float>();changed=n==3?ImGui::InputFloat3("##value",v):ImGui::InputFloat4("##value",v);value=ManagedJson::array();for(int j=0;j<n;++j)value.push_back(v[j]);}
                         else if(kind=="entity" || kind=="component") {
                             auto type=field.value("componentType","");

@@ -43,6 +43,10 @@ public readonly struct ActionSnapshot
 /// <summary>Native input state, published once per frame. Main thread only.</summary>
 public static class Input
 {
+    public static void CaptureMouse(bool capture) => NativeBridge.Call("Input.CaptureMouse", capture);
+    public static bool MouseCaptureRequested => NativeBridge.Call<bool>("Input.MouseCaptureRequested");
+    public static bool IsMouseCaptured => NativeBridge.Call<bool>("Input.MouseCaptured");
+
     public static bool GetKey(Key key) => KeyState(key, 0);
     public static bool JustPressedKey(Key key) => KeyState(key, 1);
     public static bool JustReleasedKey(Key key) => KeyState(key, 2);

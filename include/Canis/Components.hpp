@@ -1651,6 +1651,8 @@ namespace Canis
         std::string placeholder = "";
         std::string allowedCharacters = "";
         int maxLength = 64;
+        unsigned int backspaceAction = 0;
+        bool submitOnEnter = true;
 
         Color baseColor = Color(1.0f);
         Color hoverColor = Color(0.95f, 0.95f, 0.95f, 1.0f);

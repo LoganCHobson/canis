@@ -78,13 +78,21 @@ internal static class ComponentStore
         }
         return result;
     }
-    internal static string Kind(Type t) => t==typeof(bool)?"bool":t==typeof(int)?"int":t==typeof(float)?"float":t==typeof(double)?"double":t==typeof(string)?"string":t.IsEnum?"enum":t==typeof(Vector3)?"vector3":t==typeof(Vector4)?"vector4":t==typeof(Quaternion)?"quaternion":t==typeof(Entity)?"entity":typeof(Component).IsAssignableFrom(t)?"component":t==typeof(AssetReference) || typeof(Asset).IsAssignableFrom(t)?"asset":throw new InvalidOperationException($"Unsupported serialized field type {t}. Mark runtime-only fields [NonSerialized].");
+    internal static string Kind(Type t) => t==typeof(Color)?"color":t==typeof(Color[])?"color-array": t==typeof(bool)?"bool":t==typeof(int)?"int":t==typeof(float)?"float":t==typeof(double)?"double":t==typeof(string)?"string":t.IsEnum?"enum":t==typeof(Vector3)?"vector3":t==typeof(Vector4)?"vector4":t==typeof(Quaternion)?"quaternion":t==typeof(Entity)?"entity":typeof(Component).IsAssignableFrom(t)?"component":t==typeof(AssetReference) || typeof(Asset).IsAssignableFrom(t)?"asset":throw new InvalidOperationException($"Unsupported serialized field type {t}. Mark runtime-only fields [NonSerialized].");
     internal static JsonNode? Encode(object? value,Type t)
     {
         if(t==typeof(Entity))return new JsonObject{{"entity",(value is Entity e && e.IsValid?e.UUID:0).ToString()}};
         if(typeof(Component).IsAssignableFrom(t))return new JsonObject{{"entity",(value is Component c && c.IsValid?c.Entity.UUID:0).ToString()}};
         if(typeof(Asset).IsAssignableFrom(t))return JsonValue.Create((value is Asset asset?asset.UUID:0).ToString());
         if(t==typeof(AssetReference))return JsonValue.Create(((AssetReference?)value)?.UUID.ToString()??"0");
+        if (t == typeof(Color[]))
+        {
+            if (value is not Color[] colors)
+                return null;
+            return new JsonArray(colors.Select(color => Encode(color, typeof(Color))).ToArray());
+        }
+        if (value is Color color)
+            return new JsonArray(color.R, color.G, color.B, color.A);
         if(value is Vector3 v)return new JsonArray(v.X,v.Y,v.Z);
         if(value is Vector4 v4)return new JsonArray(v4.X,v4.Y,v4.Z,v4.W);
         if(value is Quaternion q)return new JsonArray(q.X,q.Y,q.Z,q.W);
@@ -106,6 +114,14 @@ internal static class ComponentStore
         }
         if(t==typeof(Entity))return Entity.FromUUID(ulong.Parse(value?["entity"]?.GetValue<string>()??"0"));
         if(t==typeof(AssetReference))return new AssetReference(ulong.Parse(value?.GetValue<string>()??"0"));
+        if (t == typeof(Color[]))
+        {
+            if (value is null)
+                return null;
+            return value.AsArray().Select(item => (Color)Decode(item, typeof(Color))!).ToArray();
+        }
+        if (t == typeof(Color))
+            return new Color(value![0]!.GetValue<float>(), value[1]!.GetValue<float>(), value[2]!.GetValue<float>(), value[3]!.GetValue<float>());
         if(t==typeof(Vector3))return new Vector3(value![0]!.GetValue<float>(),value[1]!.GetValue<float>(),value[2]!.GetValue<float>());
         if(t==typeof(Vector4))return new Vector4(value![0]!.GetValue<float>(),value[1]!.GetValue<float>(),value[2]!.GetValue<float>(),value[3]!.GetValue<float>());
         if(t==typeof(Quaternion))return new Quaternion(value![0]!.GetValue<float>(),value[1]!.GetValue<float>(),value[2]!.GetValue<float>(),value[3]!.GetValue<float>());

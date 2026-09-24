@@ -1,3 +1,4 @@
+#include <Canis/PlayerPrefs.hpp>
 #include <Canis/Scripting/TweenBindings.hpp>
 #include <Canis/Scripting/ManagedComponents.hpp>
 #include <Canis/Scripting/SceneBindings.hpp>
@@ -14,6 +15,10 @@
 #include <Canis/AudioManager.hpp>
 #include <Canis/Audio.hpp>
 #include <Canis/VR/VRSystem.hpp>
+#include <Canis/ConfigData.hpp>
+#include <Canis/Window.hpp>
+#include <Canis/ECS/Systems/UIInteractionSystem.hpp>
+#include <unordered_set>
 #include <SDL3/SDL.h>
 #include <cmath>
 #include <unordered_map>
@@ -177,6 +182,180 @@ void RegisterSceneBindings(App& app)
     RegisterTweenBindings(app, [context](uint64_t id){return context->Resolve(id);});
     RegisterInputBindings(app);
     constexpr auto owner = "Canis.Scene";
+    bindings.Method(owner, "PlayerPrefs", "HasKey", [](std::string key) { return PlayerPrefs::HasKey(key); });
+    bindings.Method(owner, "PlayerPrefs", "GetString", [](std::string key, std::string fallback) { return PlayerPrefs::GetString(key, fallback); });
+    bindings.Method(owner, "PlayerPrefs", "SetString", [](std::string key, std::string value) { PlayerPrefs::SetString(key, value); });
+    bindings.Method(owner, "PlayerPrefs", "GetInt", [](std::string key, int fallback) { return PlayerPrefs::GetInt(key, fallback); });
+    bindings.Method(owner, "PlayerPrefs", "SetInt", [](std::string key, int value) { PlayerPrefs::SetInt(key, value); });
+    bindings.Method(owner, "PlayerPrefs", "GetFloat", [](std::string key, float fallback) { return PlayerPrefs::GetFloat(key, fallback); });
+    bindings.Method(owner, "PlayerPrefs", "SetFloat", [](std::string key, float value) { PlayerPrefs::SetFloat(key, value); });
+    bindings.Method(owner, "PlayerPrefs", "GetBool", [](std::string key, bool fallback) { return PlayerPrefs::GetBool(key, fallback); });
+    bindings.Method(owner, "PlayerPrefs", "SetBool", [](std::string key, bool value) { PlayerPrefs::SetBool(key, value); });
+    bindings.Method(owner, "PlayerPrefs", "DeleteKey", [](std::string key) { PlayerPrefs::DeleteKey(key); });
+    bindings.Method(owner, "PlayerPrefs", "DeleteAll", []() { PlayerPrefs::DeleteAll(); });
+    bindings.Method(owner, "PlayerPrefs", "Save", []() { PlayerPrefs::SaveToFile(); });
+
+    bindings.Method(owner, "Application", "Quit", [&app]() { app.scene.QuitGame(); });
+    bindings.Method(owner, "Window", "Fullscreen", [&app]() -> bool {
+        return (SDL_GetWindowFlags(static_cast<SDL_Window*>(app.scene.GetWindow().GetSDLWindow())) & SDL_WINDOW_FULLSCREEN) != 0;
+    });
+    bindings.Method(owner, "Window", "SetFullscreen", [&app](bool fullscreen) {
+        auto* window = static_cast<SDL_Window*>(app.scene.GetWindow().GetSDLWindow());
+        if (((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0) != fullscreen && !SDL_SetWindowFullscreen(window, fullscreen))
+            throw std::runtime_error(SDL_GetError());
+    });
+    bindings.Method(owner, "Window", "RenderSize", [&app]() -> Vector3 {
+        return {static_cast<float>(app.scene.GetWindow().GetScreenWidth()), static_cast<float>(app.scene.GetWindow().GetScreenHeight()), 0};
+    });
+    bindings.Method(owner, "Input", "CaptureMouse", [&app](bool capture) {
+        auto& window = app.scene.GetWindow();
+        if (window.IsMouseLocked() != capture)
+            window.LockMouse(capture);
+    });
+    bindings.Method(owner, "Input", "MouseCaptureRequested", [&app]() -> bool { return app.scene.GetWindow().IsMouseLocked(); });
+    bindings.Method(owner, "Input", "MouseCaptured", [&app]() -> bool {
+        return app.scene.GetWindow().IsMouseLocked() && SDL_GetWindowRelativeMouseMode(static_cast<SDL_Window*>(app.scene.GetWindow().GetSDLWindow()));
+    });
+    bindings.Method(owner, "Clipboard", "SetText", [](std::string text) {
+        if (!SDL_SetClipboardText(text.c_str()))
+            throw std::runtime_error(SDL_GetError());
+    });
+    bindings.Method(owner, "Clipboard", "Text", []() -> std::string {
+        char* value = SDL_GetClipboardText();
+        if (value == nullptr)
+            throw std::runtime_error(SDL_GetError());
+        std::string text(value);
+        SDL_free(value);
+        return text;
+    });
+    bindings.Method(owner, "Audio", "MasterVolume", []() -> float { return GetProjectConfig().volume; });
+    bindings.Method(owner, "Audio", "SetMasterVolume", [](float volume) {
+        if (!std::isfinite(volume))
+            throw std::invalid_argument("Volume must be finite");
+        GetProjectConfig().volume = std::clamp(volume, 0.f, 1.f);
+        AudioManager::RefreshMixLevels();
+    });
+    bindings.Method(owner, "Animator", "SetFloat", [context](uint64_t id, std::string name, float value) {
+        if (!std::isfinite(value))
+            throw std::invalid_argument("Animator parameter must be finite");
+        context->Component<Animator>(id).SetFloat(name, value);
+    });
+    bindings.Method(owner, "Animator", "GetFloat", [context](uint64_t id, std::string name) -> float {
+        return context->Component<Animator>(id).GetFloat(name);
+    });
+    bindings.Method(owner, "Animator", "CurrentState", [context](uint64_t id) -> std::string {
+        return context->Component<Animator>(id).currentState;
+    });
+    bindings.Method(owner, "Scene", "Descendants", [context](uint64_t id, bool includeSelf) -> std::string {
+        auto result = ManagedJson::array();
+        std::unordered_set<uint32_t> visited;
+        auto visit = [&](auto&& self, Entity entity, bool include) -> void {
+            if (!entity || !visited.insert(static_cast<uint32_t>(entity.GetHandle())).second)
+                return;
+            if (include)
+                result.push_back(context->Handle(entity.TryGet()));
+            if (auto* transform = entity.TryGetComponent<Transform>())
+                for (auto child : transform->children)
+                    self(self, child, true);
+            if (auto* rect = entity.TryGetComponent<RectTransform>())
+                for (auto child : rect->children)
+                    self(self, child, true);
+        };
+        visit(visit, context->Resolve(id), includeSelf);
+        return result.dump();
+    });
+    bindings.Method(owner, "Physics", "Raycast", [context, &app](Vector3 origin, Vector3 direction, float distance, uint64_t ignoreRoot) -> std::string {
+        Finite(origin);
+        Finite(direction);
+        if (!std::isfinite(distance) || distance <= 0 || glm::length(direction) < .000001f)
+            throw std::invalid_argument("Raycast requires positive distance and a nonzero direction");
+        Entity ignoredRoot = ignoreRoot ? context->Resolve(ignoreRoot) : Entity{};
+        for (const auto& hit : app.scene.RaycastAll(origin, glm::normalize(direction), distance))
+        {
+            bool ignored = false;
+            std::unordered_set<uint32_t> visited;
+            for (Entity node = hit.entity; node && visited.insert(static_cast<uint32_t>(node.GetHandle())).second;)
+            {
+                if (node == ignoredRoot)
+                {
+                    ignored = true;
+                    break;
+                }
+                auto* transform = node.TryGetComponent<Transform>();
+                node = transform ? transform->parent : Entity{};
+            }
+            if (!ignored)
+                return ManagedJson({{"entity", context->Handle(hit.entity)}, {"point", {hit.point.x, hit.point.y, hit.point.z}},
+                    {"normal", {hit.normal.x, hit.normal.y, hit.normal.z}}, {"distance", hit.distance}}).dump();
+        }
+        return "null";
+    });
+    bindings.Method(owner, "Canvas", "Pointer", [context, &app](uint64_t id, uint64_t cameraId, float maxDistance, float tolerance) -> Vector3 {
+        if (!std::isfinite(maxDistance) || maxDistance <= 0 || !std::isfinite(tolerance) || tolerance < 0)
+            throw std::invalid_argument("Invalid canvas interaction distance");
+        context->Component<Canvas>(id);
+        auto& transform = context->Component<Transform>(id);
+        const auto camera = context->Resolve(cameraId);
+        Ray ray;
+        auto& window = app.scene.GetWindow();
+        const Vector2 pointer = window.IsMouseLocked() ? Vector2(window.GetScreenWidth() * .5f, window.GetScreenHeight() * .5f) : app.scene.GetInputManager().mouse;
+        if (!app.scene.TryGetRayFromCamera(camera, pointer, ray))
+            return {0, 0, 0};
+        const auto model = transform.GetModelMatrix();
+        // World canvases commonly scale pixel units down to millimeters. A small
+        // nonzero determinant is valid; only a singular transform has no inverse.
+        const float determinant = glm::determinant(model);
+        if (!std::isfinite(determinant) || determinant == 0)
+            return {0, 0, 0};
+        const auto normal = glm::normalize(Vector3(model * Vector4(0, 0, 1, 0)));
+        const float denominator = glm::dot(ray.direction, normal);
+        if (std::abs(denominator) < .00001f)
+            return {0, 0, 0};
+        const float distance = glm::dot(Vector3(model * Vector4(0, 0, 0, 1)) - ray.origin, normal) / denominator;
+        if (distance < 0 || distance > maxDistance)
+            return {0, 0, 0};
+        const auto hits = app.scene.RaycastAll(ray.origin, ray.direction, distance);
+        if (!hits.empty() && hits.front().distance < distance - tolerance)
+            return {0, 0, 0};
+        const auto local = glm::inverse(model) * Vector4(ray.origin + ray.direction * distance, 1);
+        return {local.x, local.y, 1};
+    });
+    bindings.Method(owner, "Canvas", "ScreenPoint", [context, &app](uint64_t id, Vector3 local) -> Vector3 {
+        Finite(local);
+        context->Component<Canvas>(id);
+        if (!app.scene.HasLastRenderCamera())
+            return {0, 0, 0};
+        const auto clip = app.scene.GetLastRenderProjection() * app.scene.GetLastRenderView() * context->Component<Transform>(id).GetModelMatrix() * Vector4(local, 1);
+        if (clip.w <= 0)
+            return {0, 0, 0};
+        const auto ndc = Vector3(clip) / clip.w;
+        return {(ndc.x + 1) * app.scene.GetWindow().GetScreenWidth() * .5f,
+            (1 - ndc.y) * app.scene.GetWindow().GetScreenHeight() * .5f, 1};
+    });
+    bindings.Method(owner, "UIInputField", "Focus", [context, &app](uint64_t id) -> bool {
+        context->Component<UIInputField>(id);
+        auto* ui = app.scene.GetSystem<UIInteractionSystem>();
+        if (!ui)
+            throw std::runtime_error("UIInteractionSystem is not active");
+        return ui->FocusInputField(context->Resolve(id).TryGet());
+    });
+    bindings.Method(owner, "UIInputField", "Blur", [context, &app](uint64_t id) {
+        if (context->Component<UIInputField>(id).focused)
+            if (auto* ui = app.scene.GetSystem<UIInteractionSystem>())
+                ui->FocusInputField(nullptr);
+    });
+    bindings.Method(owner, "UIInputField", "Focused", [context](uint64_t id) -> bool { return context->Component<UIInputField>(id).focused; });
+    bindings.Method(owner, "UIInputField", "Text", [context](uint64_t id) -> std::string { return context->Component<UIInputField>(id).text; });
+    bindings.Method(owner, "UIInputField", "SetText", [context](uint64_t id, std::string text) {
+        UIInteractionSystem::SetInputText(context->Component<UIInputField>(id), text);
+    });
+    bindings.Method(owner, "UIInputField", "InsertText", [context](uint64_t id, std::string text) {
+        UIInteractionSystem::InsertInputText(context->Component<UIInputField>(id), text);
+    });
+    bindings.Method(owner, "UIInputField", "Backspace", [context](uint64_t id) {
+        UIInteractionSystem::BackspaceInputText(context->Component<UIInputField>(id));
+    });
+
     bindings.Method(owner,"Component","Token",[context](uint64_t id,std::string type)->uint64_t{return context->Token(id,type);});
     bindings.Method(owner,"Component","Types",[context]()->std::string {
         auto types = ManagedJson::array();

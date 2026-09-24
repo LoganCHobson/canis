@@ -6,6 +6,7 @@
 
 namespace Canis
 {
+    struct UIInputField;
     class UIInteractionSystem : public System
     {
     private:
@@ -17,12 +18,18 @@ namespace Canis
         float m_navigationRepeat = 0.0f;
         Entity m_pressedButton = nullptr;
         Entity m_focusedInputField = nullptr;
+        bool m_textInputActive = false;
         Entity m_dragSource = nullptr;
         Entity m_hoveredDropTarget = nullptr;
 
     public:
         UIInteractionSystem() : System() { m_name = type_name<UIInteractionSystem>(); }
 
+        bool FocusInputField(Entity* entity);
+        static void SetInputText(UIInputField& field, const std::string& text);
+        static void InsertInputText(UIInputField& field, const std::string& text);
+        static void BackspaceInputText(UIInputField& field);
+        void OnDestroy() override { FocusInputField(nullptr); }
         void Create() override {}
         void Ready() override {}
         void Update(entt::registry &_registry, float _deltaTime) override;

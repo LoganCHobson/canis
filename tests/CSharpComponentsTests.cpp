@@ -1,3 +1,4 @@
+#include <Canis/PlayerPrefs.hpp>
 #include <Canis/Scripting/CSharpRuntime.hpp>
 #include <Canis/Scripting/SceneBindings.hpp>
 #include <Canis/Scripting/ManagedComponents.hpp>
@@ -44,6 +45,7 @@ static void CheckScriptIdentityPersistence(Scene& scene) {
 int main(){
     SDL_Init(0);auto root=fs::temp_directory_path()/("canis-components-"+std::to_string(SDL_GetTicksNS()));fs::create_directories(root/"assets");
     try {
+        PlayerPrefs::Init("Canis", "IntegrationTest", (root/"prefs.yaml").string());
         App app; Editor editor; app.RegisterDefaults(editor); app.scene.app=&app;RegisterSceneBindings(app);
         struct BindingCleanup { ~BindingCleanup() { UnregisterSceneBindings(); } } bindingCleanup;
         CheckScriptIdentityPersistence(app.scene);
@@ -73,8 +75,14 @@ int main(){
             initial[field]=std::to_string(static_cast<uint64_t>(AssetManager::GetMetaFile(path.string())->uuid));
         }
         initial["TargetTransform"]={{"entity","102"}};
+        initial["Palette"] = ManagedJson::array({ManagedJson::array({0.1f, 0.2f, 0.3f, 0.4f}), ManagedJson::array({0.5f, 0.6f, 0.7f, 0.8f})});
+        initial["EmptyPalette"] = ManagedJson::array();
+        initial["NullPalette"] = nullptr;
         auto encoded=app.scene.EncodeEntity(*entities[0]);
         Check(encoded["Canis::ManagedScripts"][0]["fields"]["count"].as<int>()==13,"Serialized field lost");
+        auto savedPalette = YAML::Load(YAML::Dump(encoded))["Canis::ManagedScripts"][0]["fields"]["Palette"];
+        Check(savedPalette.size() == 2 && std::abs(savedPalette[1][3].as<float>() - 0.8f) < 0.0001f,
+              "Color array lost alpha or entries during scene save");
         auto trace=root/"trace.txt",file=root/"assets/Probe.cs";
         // The old textual attachment above must still load through the metadata alias.
         Write(file.string()+".meta", "FileType: CSHARP\nUUID: 16003035088673311249\nScriptAlias: test.probe\nname: Probe\nextension: cs\nsize: 0\nmodified: 0\n");
@@ -85,6 +93,10 @@ int main(){
 public class )")+name+R"(:ScriptableEntity {
 [SerializeField,FormerlySerializedAs("count")] private int )"+field+R"(=7;
 public Entity? Target;
+public Color Tint = new(.2f, .3f, .4f, .5f);
+public Color[] Palette = { new(1, 0, 0) };
+public Color[] EmptyPalette = { new(1, 1, 1) };
+public Color[]? NullPalette = { new(1, 1, 1) };
 [Header("References"),Tooltip("Spawn template")] public PrefabAsset? Prefab;
 public Transform? TargetTransform;
 public Counter? Data;
@@ -107,6 +119,26 @@ void Emit(string s)=>File.AppendAllText(@")"+trace.string()+R"(",s+"\n");
 public override void Awake(){Emit("awake:"+)"+field+R"(+":"+Target?.Name);}
 public override void OnEnable()=>Emit("enable");
 public override void Start(){
+ PlayerPrefs.SetString("managed.text", "Chef é|hello\nworld");
+ PlayerPrefs.SetInt("managed.int", 123);
+ PlayerPrefs.SetFloat("managed.float", .003f);
+ PlayerPrefs.SetBool("managed.bool", true);
+ PlayerPrefs.Save();
+ if (PlayerPrefs.GetString("managed.text") != "Chef é|hello\nworld" || PlayerPrefs.GetInt("managed.int") != 123 ||
+     PlayerPrefs.GetFloat("managed.float") != .003f || !PlayerPrefs.GetBool("managed.bool"))
+     throw new Exception("Managed PlayerPrefs roundtrip failed");
+ PlayerPrefs.DeleteKey("managed.int");
+ if (PlayerPrefs.HasKey("managed.int") || PlayerPrefs.GetInt("managed.int", 7) != 7)
+     throw new Exception("Managed PlayerPrefs defaults/deletion failed");
+ if (Palette.Length != 2 || Math.Abs(Palette[0].R - .1f) > .0001f || Math.Abs(Palette[1].A - .8f) > .0001f)
+     throw new Exception("Color palette was not restored");
+ if (EmptyPalette.Length != 0 || NullPalette != null || Tint.A != .5f)
+     throw new Exception("Color defaults or empty/null arrays were not restored");
+ System.Numerics.Vector4 rgba = Palette[1];
+ Color roundTrip = rgba;
+ if (roundTrip.G != Palette[1].G || rgba.W != Palette[1].A)
+     throw new Exception("Color conversion failed");
+ Emit("palette:" + RestoredFromReload);
  Tween.To(()=>tweened,v=>tweened=v,1f,100).SetLink(Entity).OnUpdate(()=>Emit("tween:"+GetType().Name));
  if(!Canis.Entity.All().Any(e=>e.Name=="Target"))throw new Exception("Entity.All lost native-only entities");
  Emit("start");if(GetComponent<Counter>() is null)AddComponent<Counter>();
@@ -122,6 +154,30 @@ public override void Start(){
  if(childTransform.Parent!=parent || Math.Abs(childTransform.Position.X-2)>.001f)throw new Exception("World parenting failed");
  childTransform.SetParent(null);childTransform.SetParent(parent,false);
  if(Math.Abs(childTransform.Position.X-12)>.001f)throw new Exception("Local parenting failed");
+ if (parent.Descendants().Length != 1 || parent.Descendants()[0] != child || parent.Descendants(true).Length != 2)
+     throw new Exception("Engine hierarchy traversal failed");
+ var inputField = child.AddComponent<UIInputField>();
+ inputField.MaxLength = 3;
+ inputField.Text = "aé😀z";
+ if (inputField.Text != "aé😀")
+     throw new Exception("Managed input text length split UTF-8");
+ inputField.Backspace();
+ inputField.InsertText("b");
+ if (inputField.Text != "aéb")
+     throw new Exception("Managed input text editing failed");
+ child.RemoveComponent<UIInputField>();
+ try
+ {
+     inputField.InsertText("x");
+     throw new Exception("Destroyed input wrapper accepted writes");
+ }
+ catch (MissingObjectException) { }
+ try
+ {
+     Physics.Raycast(System.Numerics.Vector3.Zero, System.Numerics.Vector3.Zero, 1);
+     throw new Exception("Invalid ray was accepted");
+ }
+ catch (InvalidOperationException) { }
  child.Destroy();parent.Destroy();
  var spawned=Prefabs.Instantiate(Prefab);
  if(spawned.Length!=1 || spawned[0].Name!="Spawned")throw new Exception("Prefab instantiate failed");
@@ -173,6 +229,7 @@ public override void OnDestroy()=>Emit("destroy");
             auto click=[&](const std::string& action="ButtonClick"){return app.DispatchUIAction(*entities[0],binding,action,{});};
             Check(!click(), "C# button invoked outside Play");
             runtime.Tick(true,false,.01f);Check(Read(trace).find("awake:13:Target")!=std::string::npos,"Attachment/serialized references not restored before Awake");
+            Check(Read(trace).find("palette:False") != std::string::npos, "Authored color array did not reach gameplay");
             Check(click() && Read(trace).find("button:Probe")!=std::string::npos, "Button did not call attached C# instance");
             for(const auto* invalid:{"Missing","HiddenButton","ReturningButton","GenericButton","StaticButton","AsyncButton","Start","OnDestroy"})
                 Check(!click(invalid),"C# button called an unsupported method");
@@ -202,6 +259,7 @@ public override void OnDestroy()=>Emit("destroy");
             Check(app.scene.tweens.ActiveCount()==1,"Reload retained old-generation tween delegates");
             app.scene.tweens.Update(.1,.1);
             Check(Read(trace).find("tween:RenamedProbe")!=std::string::npos,"Reloaded tween did not execute");
+            Check(Read(trace).find("palette:True") != std::string::npos, "Color array did not survive live reload");
             Check(click() && Read(trace).find("button:RenamedProbe")!=std::string::npos, "C# button did not resolve reloaded script instance");
             Check(runtime.CollectRetiredContexts()==0,"Tween registry kept retired gameplay assembly alive");
             DecodeManagedComponents(YAML::Load("Canis::ManagedScripts: [{type: test.fault, enabled: true, fields: {}}]"),*entities[1]);

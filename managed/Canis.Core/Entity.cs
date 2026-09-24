@@ -22,6 +22,13 @@ public sealed class Entity : IEquatable<Entity>
     public static Entity? Find(string name)=>FromHandle(NativeBridge.Call<ulong>("Scene.Find",name));
     public static Entity? FromUUID(ulong uuid)=>FromHandle(NativeBridge.Call<ulong>("Scene.FromUUID",uuid));
     public static Entity Create(string name="Entity")=>FromHandle(NativeBridge.Call<ulong>("Scene.Create",name))!;
+    /// <summary>Snapshot of transform/rect-transform descendants, without duplicates.</summary>
+    public Entity[] Descendants(bool includeSelf = false)
+    {
+        var handles = System.Text.Json.JsonSerializer.Deserialize<ulong[]>(NativeBridge.Call<string>("Scene.Descendants", Handle, includeSelf))!;
+        return handles.Select(handle => FromHandle(handle)!).ToArray();
+    }
+
     public void Destroy()=>NativeBridge.Call("Scene.Destroy",Handle);
     public bool IsValid=>NativeBridge.Call<bool>("Scene.IsValid",Handle);
     public string Name {get=>NativeBridge.Call<string>("Scene.Name",Handle);set=>NativeBridge.Call("Scene.SetName",Handle,value);}
