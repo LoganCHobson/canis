@@ -141,6 +141,8 @@ namespace Canis
     VR::System* App::GetVR() { return m_runtime ? m_runtime->vr.get() : nullptr; }
     const VR::System* App::GetVR() const { return m_runtime ? m_runtime->vr.get() : nullptr; }
 
+    namespace { int EnvironmentDimension(const char*, int, int, int); }
+
     bool App::StartEditorVR(bool simulated, std::string &error)
     {
         if (!m_runtime || !m_runtime->editorRuntimeEnabled || m_runtime->vr)
@@ -154,6 +156,11 @@ namespace Canis
         { error = "The editor graphics context is unavailable."; return false; }
         VR::Config config;
         config.mode = simulated ? VR::Mode::Simulated : VR::Mode::OpenXR;
+        if (simulated) {
+            config.simulationEyeWidth = EnvironmentDimension("CANIS_VR_SIM_EYE_WIDTH", config.simulationEyeWidth, 16, 4096);
+            config.simulationEyeHeight = EnvironmentDimension("CANIS_VR_SIM_EYE_HEIGHT", config.simulationEyeHeight, 16, 4096);
+            Debug::Log("VR simulation render size: %dx%d per eye", config.simulationEyeWidth, config.simulationEyeHeight);
+        }
         if (!VR::LoadPlayerSettings("project_settings/vr.canis", config.player, error) ||
             !VR::LoadPlayerSettings("user_settings/vr.canis", config.player, error))
             return false;
@@ -2270,6 +2277,7 @@ namespace Canis
         if (inputManager.ConsumeResumeFrameResetRequest())
             Time::ResetFrameClock();
 
+        Profiler::FrameScope profilerFrame;
         if (runtime.vr && !runtime.stopEditorVR)
         {
             std::string error;
@@ -2301,7 +2309,6 @@ namespace Canis
                 { runtime.exitReason = "vr-exit-requested"; return false; }
             }
         }
-        Profiler::FrameScope profilerFrame;
         f32 deltaTime = Time::StartFrame();
 
         for (const unsigned int key : runtime.pulseKeys)

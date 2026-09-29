@@ -7,6 +7,7 @@
 #include <Canis/OpenGL.hpp>
 #include <Canis/Window.hpp>
 #include <Canis/Debug.hpp>
+#include <Canis/Profiler.hpp>
 #include <SDL3/SDL.h>
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -463,7 +464,11 @@ namespace Canis::VR
                 state.focused = sessionState == XR_SESSION_STATE_FOCUSED;
                 if (!running) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); return; }
                 XrFrameWaitInfo wait{XR_TYPE_FRAME_WAIT_INFO}; XrFrameState frame{XR_TYPE_FRAME_STATE};
-                Check(xrWaitFrame(session, &wait, &frame), "xrWaitFrame"); displayTime = frame.predictedDisplayTime;
+                {
+                    Profiler::Scope timing("OpenXR frame wait", Profiler::Category::Wait);
+                    Check(xrWaitFrame(session, &wait, &frame), "xrWaitFrame");
+                }
+                displayTime = frame.predictedDisplayTime;
                 XrFrameBeginInfo begin{XR_TYPE_FRAME_BEGIN_INFO};
                 Check(xrBeginFrame(session, &begin), "xrBeginFrame"); begun = true;
                 XrViewLocateInfo locate{XR_TYPE_VIEW_LOCATE_INFO}; locate.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
@@ -498,7 +503,8 @@ namespace Canis::VR
                             XrSwapchainImageAcquireInfo acquire{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
                             Check(xrAcquireSwapchainImage(chain.handle, &acquire, &index), "xrAcquireSwapchainImage");
                             XrSwapchainImageWaitInfo wait{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO}; wait.timeout = XR_INFINITE_DURATION;
-                            Check(xrWaitSwapchainImage(chain.handle, &wait), "xrWaitSwapchainImage");
+                            { Profiler::Scope timing("OpenXR swapchain wait", Profiler::Category::Wait);
+                              Check(xrWaitSwapchainImage(chain.handle, &wait), "xrWaitSwapchainImage"); }
                             auto release = [&] { XrSwapchainImageReleaseInfo info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO}; return xrReleaseSwapchainImage(chain.handle, &info); };
                             try
                             {
@@ -526,6 +532,7 @@ namespace Canis::VR
                     const XrCompositionLayerBaseHeader* base = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection);
                     XrFrameEndInfo end{XR_TYPE_FRAME_END_INFO}; end.displayTime = displayTime; end.environmentBlendMode = blend;
                     end.layerCount = state.shouldRender ? 1 : 0; end.layers = state.shouldRender ? &base : nullptr;
+                    Profiler::Scope submitTiming("OpenXR frame submission", Profiler::Category::Wait);
                     const auto result = xrEndFrame(session, &end); begun = false;
                     Check(result, "xrEndFrame");
                 }

@@ -421,7 +421,24 @@ namespace Canis
             std::string modelPath;
             i32 modelId = -1, nodeIndex = -1;
             u64 geometryRevision = 0;
-            bool operator==(const BodySettings&) const = default;
+            bool operator==(const BodySettings& other) const
+            {
+                // Matrix decomposition introduces rounding when a hierarchy rotates.
+                // Compare against the scale of the existing shape (never the previous
+                // frame), so accumulated scale edits still trigger a rebuild.
+                for (int axis = 0; axis < 3; ++axis) {
+                    const float a = worldScale[axis], b = other.worldScale[axis];
+                    if (!std::isfinite(a) || !std::isfinite(b) ||
+                        std::abs(a - b) > 2.e-6f * std::max(std::abs(a), std::abs(b)))
+                        return false;
+                }
+                // Authored collider and body settings retain exact comparison.
+                return std::tie(body, shape, offset, size, radius, halfHeight, attached,
+                           applyNodeTransform, modelPath, modelId, nodeIndex, geometryRevision) ==
+                       std::tie(other.body, other.shape, other.offset, other.size, other.radius,
+                           other.halfHeight, other.attached, other.applyNodeTransform,
+                           other.modelPath, other.modelId, other.nodeIndex, other.geometryRevision);
+            }
         };
 
         BodySettings CaptureSettings(entt::registry& registry, entt::entity handle,
@@ -1233,6 +1250,8 @@ namespace Canis
                 return true;
             }
 
+            Profiler::Scope rebuildTiming(bodyIt != bodies.end() ? "Physics body rebuild" : "Physics body creation",
+                Profiler::Category::Physics);
             if (bodyIt != bodies.end())
                 RemoveBodyFromWorld(bodyIt->second.bodyID);
 

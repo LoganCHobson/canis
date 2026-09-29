@@ -1,3 +1,4 @@
+#include <Canis/StaticVisibility.hpp>
 #include <Canis/Asset.hpp>
 #include <Canis/Frustum.hpp>
 #include <Canis/OpenGL.hpp>
@@ -64,6 +65,52 @@ static void RoomOcclusion(Window& window) {
     renderer.OnDestroy();AssetManager::FreeModel(modelId);
 }
 
+static void StereoPreparation(Window& window) {
+    Scene scene;
+    auto parent=scene.CreateEntity("Parent");parent.AddComponent<Transform>();
+    auto other=scene.CreateEntity("Other parent");other.AddComponent<Transform>();
+    auto child=scene.CreateEntity("Cached static model");
+    auto& t=*child.AddComponent<Transform>();t.position=Vector3(0,0,-3);t.SetParent(&parent);
+    int id=AssetManager::CreateModel();
+    ModelAsset::PrimitiveBuild3D quad;
+    quad.vertices={{{-1,-1,0},{0,0,1},{}},{{1,-1,0},{0,0,1},{}},{{1,1,0},{0,0,1},{}},{{-1,1,0},{0,0,1},{}}};
+    quad.indices={0,1,2,0,2,3};
+    Check(AssetManager::GetModel(id)->SetRuntimePrimitives({quad}),"Stereo fixture geometry failed");
+    auto& model=*child.AddComponent<Model>();model.modelId=id;model.staticModel=true;
+    MeshRenderer3DSystem cached;cached.scene=&scene;cached.window=&window;cached.Create();
+    auto draw=[&](MeshRenderer3DSystem& renderer,bool stereo) {
+        std::vector<unsigned char> pixels(320*240*4*2);
+        if(stereo)renderer.BeginStereoFrame(Vector3(0));
+        for(int eye=0;eye<2;++eye) {
+            scene.SetVRCamera(glm::translate(Matrix4(1),Vector3(eye ? -.032f : .032f,0,0)),
+                glm::perspective(glm::radians(70.f),320.f/240.f,.1f,100.f),.1f,100.f);
+            glViewport(0,0,320,240);glDepthMask(GL_TRUE);glClearColor(0,0,0,1);
+            glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+            renderer.Update(scene.GetRegistry(),1.f/60.f);
+            glReadPixels(0,0,320,240,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data()+eye*320*240*4);
+        }
+        if(stereo)renderer.EndStereoFrame();
+        return pixels;
+    };
+    auto verify=[&]() {
+        auto actual=draw(cached,true);
+        MeshRenderer3DSystem reference;reference.scene=&scene;reference.window=&window;reference.Create();
+        auto expected=draw(reference,false);reference.OnDestroy();
+        Check(actual==expected,"Shared/persistent render preparation differs from fresh per-eye rendering");
+        return actual;
+    };
+    auto initial=verify();verify();
+    parent.GetComponent<Transform>().position.x=.7f;
+    Check(verify()!=initial,"Parent movement retained stale pixels");
+    parent.GetComponent<Transform>().scale=Vector3(-.7f,1.2f,1);verify();
+    parent.GetComponent<Transform>().rotation=glm::angleAxis(.3f,Vector3(0,0,1));verify();
+    t.SetLocalMatrixPrefix(glm::translate(Matrix4(1),Vector3(.2f,.3f,0)));verify();
+    t.ClearLocalMatrixPrefix();t.SetParent(&other);verify();
+    t.active=false;auto hidden=verify();t.active=true;
+    Check(verify()!=hidden,"Reactivated model missing from prepared candidates");
+    cached.OnDestroy();AssetManager::FreeModel(id);
+}
+
 int main(int argc,char** argv) {
     try {
         if(argc>1)std::filesystem::current_path(argv[1]);
@@ -80,6 +127,31 @@ int main(int argc,char** argv) {
         const auto left=glm::frustum(-.12f,.08f,-.1f,.1f,.1f,100.f);
         const auto right=glm::frustum(-.08f,.12f,-.1f,.1f,.1f,100.f);
         Check(!BoundsOutsideFrustum(left*scaled,lo,hi) && !BoundsOutsideFrustum(right*scaled,lo,hi),"Stereo projection culled visible bounds");
+        StaticVisibility spatial;
+        std::vector<StaticVisibility::Bounds> boxes;
+        for(size_t i=0;i<256;++i) {
+            Vector3 p(float(i%16)*3-24,float(i/16%4)*2-4,-float(i/64)*12-3);
+            boxes.push_back({i,p-Vector3(.5f),p+Vector3(.5f)});
+        }
+        auto checkSpatial=[&] {
+            spatial.Update(boxes);
+            for(int frame=0;frame<12;++frame) {
+                Matrix4 clip=projection*glm::translate(Matrix4(1),Vector3(frame*2-12,0,0));
+                std::vector<unsigned char> hidden;spatial.Query(clip,boxes.size(),hidden);
+                size_t rejected=0;
+                for(const auto& box:boxes)if(hidden[box.candidate]) {
+                    ++rejected;
+                    Check(BoundsOutsideFrustum(clip,box.minimum,box.maximum),"Spatial tree rejected visible bounds");
+                }
+                Check(rejected>0,"Spatial tree did not reject any offscreen clusters");
+            }
+        };
+        checkSpatial();
+        boxes[0].minimum=Vector3(-.2f,-.2f,-2);boxes[0].maximum=Vector3(.2f,.2f,-1);
+        checkSpatial();
+        spatial.Update({});std::vector<unsigned char> emptyVisibility;
+        spatial.Query(projection,3,emptyVisibility);
+        Check(emptyVisibility==std::vector<unsigned char>(3,0),"Cleared spatial tree retained stale rejection");
         Window window("Renderer tests",320,240,true);
         Time::Init(120);
         Time::StartFrame();SDL_Delay(2200);Time::EndFrame();
@@ -180,6 +252,7 @@ int main(int argc,char** argv) {
         Check(glGetError()==GL_NO_ERROR,"OpenGL error during instancing");
         model.Free();
         RoomOcclusion(window);
+        StereoPreparation(window);
         std::cout<<"Frustum, stereo, bounds invalidation and instanced pixel parity passed\n";
         return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <cstdlib>
 
 namespace Canis::Profiler
 {
@@ -62,6 +63,31 @@ namespace Canis::Profiler
             accounted += sample.selfMs;
         }
         current.categories[0] += std::max(0.0,current.totalMs-accounted);
+        // Optional bounded-memory, whole-session timing capture. Buffered CSV
+        // avoids retaining an unbounded trace during headset playtests.
+        static thread_local std::ofstream frameOutput;
+        static thread_local bool outputInitialized=false;
+        if(!outputInitialized) {
+            outputInitialized=true;
+            if(const char* path=std::getenv("CANIS_CPU_FRAME_OUTPUT")) {
+                frameOutput.open(path);
+                if(frameOutput)frameOutput<<"frame,start_ns,total_ms,scene_update_ms,game_update_ms,scripts_ms,physics_sync_ms,animation_ms,render_preparation_ms,xr_wait_ms,vr_eyes_ms,present_ms,limiter_ms,xr_swapchain_wait_ms,xr_submit_ms,body_rebuild_ms,body_rebuild_count\n";
+            }
+        }
+        if(frameOutput.is_open() && frameOutput) {
+            static constexpr const char* names[]={"Scene.Update","Game.Update","C# Scripts.Update",
+                "Physics body synchronization","Canis::ModelAnimation3DSystem","Render frame preparation",
+                "OpenXR frame wait","VR eye","Present","Frame limiter","OpenXR swapchain wait","OpenXR frame submission","Physics body rebuild"};
+            double totals[13]{};
+            size_t rebuildCount = 0;
+            for(const auto& sample:current.samples)
+                for(size_t i=0;i<13;++i)if(sample.name==names[i])totals[i]+=sample.totalMs;
+            for(const auto& sample:current.samples) rebuildCount += sample.name == "Physics body rebuild";
+            frameOutput<<current.id<<','<<current.startNs<<','<<current.totalMs;
+            for(double total:totals)frameOutput<<','<<total;
+            frameOutput<<','<<rebuildCount<<'\n';
+            if(current.id%90==0)frameOutput.flush();
+        }
         if (recording) {
             if (frames.size() == MaxFrames) frames.pop_front();
             frames.push_back(std::move(current));

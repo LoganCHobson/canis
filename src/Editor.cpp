@@ -18542,7 +18542,13 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
             static bool autoPlayRequested=false;
             const char* autoPlay=std::getenv("CANIS_EDITOR_AUTOPLAY");
             const bool startAutomatically=!autoPlayRequested && autoPlay && std::string(autoPlay)=="1";
-            if(startAutomatically)autoPlayRequested=true;
+            if(startAutomatically) {
+                autoPlayRequested=true;
+                if(const char* target=std::getenv("CANIS_EDITOR_AUTOPLAY_TARGET")) {
+                    if(std::string(target)=="vr-sim")m_playTarget=2;
+                    else if(std::string(target)=="headset")m_playTarget=1;
+                }
+            }
             if (!m_playPending && (startAutomatically || playPressed || (ImGui::IsKeyDown(ImGuiKey_P) && ImGui::IsKeyDown(ImGuiKey_LeftCtrl) && hotKeyCoolDown < 0.0f)))
             {
                 hotKeyCoolDown = HOTKEYRESET;

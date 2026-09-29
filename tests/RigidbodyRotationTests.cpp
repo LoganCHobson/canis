@@ -1,5 +1,6 @@
 #include <Canis/Components.hpp>
 #include <Canis/Scene.hpp>
+#include <Canis/Profiler.hpp>
 #include <Canis/ECS/Systems/JoltPhysics3DSystem.hpp>
 #include <cmath>
 #include <iostream>
@@ -178,10 +179,66 @@ static void UnchangedKinematicCommands()
     Check(std::abs(transform.position.x - 10) < .001f, "Kinematic teleport was lost");
 }
 
+static void RotationRebuilds()
+{
+    Scene scene;
+    JoltPhysics3DSystem physics;
+    physics.scene = &scene; physics.Create();
+    auto parent = scene.CreateEntity("Moving truck");
+    parent.AddComponent<Transform>();
+    auto child = scene.CreateEntity("Attached collider");
+    auto& transform = *child.AddComponent<Transform>();
+    transform.SetParent(&parent);
+    transform.scale = Vector3(.7f, 1.3f, 2.1f);
+    child.AddComponent<Rigidbody>()->motionType = RigidbodyMotionType::STATIC;
+    child.AddComponent<BoxCollider>();
+    auto& recorder = Profiler::Get();
+    recorder.SetRecording(true);
+    auto step = [&] {
+        { Profiler::FrameScope frame; physics.Update(scene.GetRegistry(), 1.f/60.f); }
+        int count = 0;
+        for (const auto& sample : recorder.Frames().back().samples)
+            count += sample.name == "Physics body rebuild";
+        return count;
+    };
+    step();
+    int rebuilds = 0;
+    for (int i = 0; i < 600; ++i) {
+        auto& pose = parent.GetComponent<Transform>();
+        pose.rotation = glm::angleAxis(i * .007f, glm::normalize(Vector3(.1f, 1, .2f)));
+        pose.position = Vector3(i * .02f, 0, 0);
+        rebuilds += step();
+    }
+    std::cout << "Rotation-only collider rebuilds: " << rebuilds << "/600 frames\n";
+    Check(rebuilds == 0, "Rigid parent motion rebuilt an unchanged collider");
+    auto& pose = parent.GetComponent<Transform>();
+    const auto center = transform.GetGlobalPosition();
+    Check(physics.Raycast(center + Vector3(0,5,0), Vector3(0,-1,0), 10),
+          "Reused collider did not follow its parent");
+    pose.scale = Vector3(2);
+    Check(step() == 1, "Real parent scale change did not rebuild");
+    int gradualRebuilds = 0;
+    for (int i = 0; i < 100; ++i) {
+        pose.scale += Vector3(5.e-7f);
+        gradualRebuilds += step();
+    }
+    Check(gradualRebuilds > 0, "Cumulative sub-tolerance scale edits were lost");
+    auto& collider = child.GetComponent<BoxCollider>();
+    collider.size.x += 1.e-7f;
+    Check(step() == 1, "Tiny authored collider edit was ignored");
+    // Child rotation under nonuniform parent scale changes effective scale/shear.
+    pose.scale = Vector3(1,2,3);
+    step();
+    transform.rotation = glm::angleAxis(.3f, Vector3(0,1,0));
+    Check(step() == 1, "Effective scale change under nonuniform parent was ignored");
+    recorder.SetRecording(false);
+}
+
 int main()
 {
     try {
         for (float dt : {1.f/30.f,1.f/60.f,1.f/144.f}) StepContact(dt);
+        RotationRebuilds();
         RuntimeLocks();
         StaticEdits();
         UnchangedKinematicCommands();

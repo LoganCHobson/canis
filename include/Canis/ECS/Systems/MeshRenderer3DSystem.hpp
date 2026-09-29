@@ -23,12 +23,14 @@ namespace Canis
         {
             m_stereoFrame = true;
             m_stereoShadowReady = false;
+            m_stereoPrepared = false;
             m_stereoShadowCenter = shadowCenter;
         }
-        void EndStereoFrame() { m_stereoFrame = m_stereoShadowReady = false; }
+        void EndStereoFrame() { m_stereoFrame = m_stereoShadowReady = m_stereoPrepared = false; }
 
     private:
         bool m_stereoFrame = false;
+        bool m_stereoPrepared = false;
         bool m_stereoShadowReady = false;
         Vector3 m_stereoShadowCenter{0.0f};
         std::shared_ptr<MeshRendererCache> m_batchCache;

@@ -1,3 +1,4 @@
+#include <Canis/StaticVisibility.hpp>
 #include <Canis/ECS/Systems/MeshRenderer3DSystem.hpp>
 #include <Canis/VFX/Trails.hpp>
 #include <Canis/Frustum.hpp>
@@ -400,8 +401,8 @@ namespace Canis
             float distanceSquared = 0.0f;
         };
 
-        bool OutsideView(entt::registry& registry,entt::entity handle,ModelAsset& asset,
-                         Model& model,const Matrix4& matrix,const Matrix4& clip,Shader* defaultShader)
+        bool CullBounds(entt::registry& registry,entt::entity handle,ModelAsset& asset,
+                        Model& model,Shader* defaultShader,Vector3& minimum,Vector3& maximum)
         {
             if (!RenderMetrics::CullingEnabled() || !model.staticModel || asset.HasDeformingGeometry() ||
                 registry.try_get<ModelAnimation>(handle) || registry.try_get<Terrain>(handle)) return false;
@@ -416,9 +417,7 @@ namespace Canis
                     }
                 }
             }
-            Vector3 minimum,maximum;
-            return asset.GetLocalBounds(minimum,maximum,model.nodeIndex,model.applyNodeTransform) &&
-                BoundsOutsideFrustum(clip*matrix,minimum,maximum);
+            return asset.GetLocalBounds(minimum,maximum,model.nodeIndex,model.applyNodeTransform);
         }
 
         bool UsesTransparentColor(const Color &_color)
@@ -531,7 +530,31 @@ namespace Canis
 
     struct MeshRendererCache
     {
-        std::unordered_map<entt::entity,Matrix4> frameMatrices;
+        struct TransformRecord {
+            uint64_t frame = 0, revision = 0, parentRevision = 0;
+            entt::entity parent = entt::null;
+            Vector3 position{0}, scale{1};
+            Quaternion rotation{1,0,0,0};
+            bool prefixEnabled = false;
+            Matrix4 prefix{1}, matrix{1};
+            uint64_t boundsRevision=0;
+            Vector3 localMinimum{0},localMaximum{0},worldMinimum{0},worldMaximum{0};
+            bool finiteBounds=false;
+        };
+        std::unordered_map<entt::entity,TransformRecord> frameMatrices;
+        uint64_t preparationFrame = 0, transformRevision = 0;
+        struct Candidate {
+            entt::entity handle;
+            ModelAsset* asset;
+            bool transparent;
+            bool cullable;
+            Vector3 minimum, maximum;
+        };
+        std::vector<Candidate> candidates;
+        StaticVisibility visibility;
+        std::vector<StaticVisibility::Bounds> staticBounds;
+        std::vector<unsigned char> hiddenCandidates;
+        std::vector<TransparentModelEntry> opaqueScratch, transparentScratch;
         struct Input {
             StaticModelBatchKey key;
             Matrix4 matrix;
@@ -614,13 +637,30 @@ namespace Canis
 
     const Matrix4& MeshRenderer3DSystem::RenderMatrix(entt::entity handle,const Transform& transform)
     {
-        auto& matrices=m_batchCache->frameMatrices;
-        if(auto found=matrices.find(handle);found!=matrices.end())return found->second;
-        Matrix4 matrix=transform.GetLocalMatrix();
-        if(transform.parent)
-            if(auto* parent=transform.parent->TryGetComponent<Transform>())
-                matrix=RenderMatrix(transform.parent.GetHandle(),*parent)*matrix;
-        return matrices.emplace(handle,matrix).first->second;
+        auto& cache = *m_batchCache;
+        auto& record = cache.frameMatrices[handle];
+        if (record.frame == cache.preparationFrame) return record.matrix;
+        const Matrix4* parentMatrix = nullptr;
+        entt::entity parentHandle = entt::null;
+        uint64_t parentRevision = 0;
+        if (transform.parent)
+            if (auto* parent = transform.parent->TryGetComponent<Transform>()) {
+                parentHandle = transform.parent.GetHandle();
+                parentMatrix = &RenderMatrix(parentHandle, *parent);
+                parentRevision = cache.frameMatrices.at(parentHandle).revision;
+            }
+        if (!record.revision || record.parent != parentHandle || record.parentRevision != parentRevision ||
+            record.position != transform.position || record.rotation != transform.rotation ||
+            record.scale != transform.scale || record.prefixEnabled != transform.useLocalMatrixPrefix ||
+            (transform.useLocalMatrixPrefix && record.prefix != transform.localMatrixPrefix)) {
+            record.parent = parentHandle; record.parentRevision = parentRevision;
+            record.position = transform.position; record.rotation = transform.rotation; record.scale = transform.scale;
+            record.prefixEnabled = transform.useLocalMatrixPrefix; record.prefix = transform.localMatrixPrefix;
+            record.matrix = parentMatrix ? *parentMatrix * transform.GetLocalMatrix() : transform.GetLocalMatrix();
+            record.revision = ++cache.transformRevision;
+        }
+        record.frame = cache.preparationFrame;
+        return record.matrix;
     }
 
     void MeshRenderer3DSystem::Create()
@@ -1107,31 +1147,18 @@ namespace Canis
             glGetUniformLocation(m_shadowShader->GetProgramID(),"useInstanceMatrix")>=0;
 
         auto modelView = _registry.view<Transform, Model>();
-        for (const entt::entity entityHandle : modelView)
+        m_batchCache->visibility.Query(m_shadowLightSpaceMatrix,m_batchCache->candidates.size(),m_batchCache->hiddenCandidates);
+        size_t candidateIndex=0;
+        for (const auto& candidate : m_batchCache->candidates)
         {
+            const bool hidden=m_batchCache->hiddenCandidates[candidateIndex++];
+            const auto entityHandle = candidate.handle;
             Transform &transform = modelView.get<Transform>(entityHandle);
             Model &modelRenderer = modelView.get<Model>(entityHandle);
-            Entity *entity = modelRenderer.entity;
-            if (entity == nullptr)
-                entity = transform.entity;
+            ModelAsset *model = candidate.asset;
+            if (!modelRenderer.castShadow) continue;
 
-            if ((entity != nullptr && !entity->Active()) ||
-                !transform.IsActiveInHierarchy() ||
-                modelRenderer.modelId < 0 ||
-                !modelRenderer.castShadow)
-                continue;
-            if (const BlockoutShape *blockout = _registry.try_get<BlockoutShape>(entityHandle))
-            {
-                if (!blockout->active ||
-                    (!blockout->visibleInGame && !scene->HasEditorCamera3DOverride()))
-                    continue;
-            }
-
-            ModelAsset *model = AssetManager::GetModel(modelRenderer.modelId);
-            if (model == nullptr)
-                continue;
-
-            if (OutsideView(_registry,entityHandle,*model,modelRenderer,RenderMatrix(entityHandle,transform),m_shadowLightSpaceMatrix,m_shader)) {
+            if (hidden || (candidate.cullable && BoundsOutsideFrustum(m_shadowLightSpaceMatrix*RenderMatrix(entityHandle,transform),candidate.minimum,candidate.maximum))) {
                 RenderMetrics::Cull(true);continue;
             }
             if (shadowInstancing && modelRenderer.staticModel && !model->HasDeformingGeometry() &&
@@ -1254,7 +1281,55 @@ namespace Canis
         if (m_shader == nullptr)
             return;
         if(!m_batchCache)m_batchCache=std::make_shared<MeshRendererCache>();
-        m_batchCache->frameMatrices.clear();
+        // Scene simulation and bone attachments finish before BeginStereoFrame.
+        // Freeze shared eligibility and world transforms for the two eye submissions;
+        // visibility, distance sorting, and shader state remain per-view.
+        if (!m_stereoFrame || !m_stereoPrepared) {
+            Profiler::Scope preparation("Render frame preparation", RenderMetrics::ProfileCategory());
+            auto& cache = *m_batchCache;
+            ++cache.preparationFrame;
+            cache.candidates.clear();
+            cache.staticBounds.clear();
+            auto models = _registry.view<Transform, Model>();
+            cache.candidates.reserve(models.size_hint());
+            for (auto handle : models) {
+                auto& transform = models.get<Transform>(handle);
+                auto& model = models.get<Model>(handle);
+                Entity* entity = model.entity ? model.entity : transform.entity;
+                if ((entity && !entity->Active()) || !transform.IsActiveInHierarchy() || model.modelId < 0) continue;
+                if (auto* blockout = _registry.try_get<BlockoutShape>(handle))
+                    if (!blockout->active || (!blockout->visibleInGame && !scene->HasEditorCamera3DOverride())) continue;
+                auto* asset = AssetManager::GetModel(model.modelId);
+                if (!asset) continue;
+                const auto& matrix=RenderMatrix(handle, transform);
+                Vector3 minimum{0},maximum{0};
+                const bool cullable=CullBounds(_registry,handle,*asset,model,m_shader,minimum,maximum);
+                if(cullable) {
+                    auto& record=cache.frameMatrices.at(handle);
+                    if(record.boundsRevision!=record.revision || record.localMinimum!=minimum || record.localMaximum!=maximum) {
+                        Vector3 lo(FLT_MAX),hi(-FLT_MAX);
+                        bool finite=matrix[0][3]==0 && matrix[1][3]==0 && matrix[2][3]==0 && matrix[3][3]==1;
+                        for(int corner=0;corner<8;++corner) {
+                            Vector3 point(matrix*Vector4(corner&1?maximum.x:minimum.x,corner&2?maximum.y:minimum.y,corner&4?maximum.z:minimum.z,1));
+                            finite=finite && std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z);
+                            lo=glm::min(lo,point);hi=glm::max(hi,point);
+                        }
+                        record.boundsRevision=record.revision;
+                        record.localMinimum=minimum;record.localMaximum=maximum;
+                        record.worldMinimum=lo-Vector3(.01f);record.worldMaximum=hi+Vector3(.01f);
+                        record.finiteBounds=finite;
+                    }
+                    if(record.finiteBounds)cache.staticBounds.push_back({cache.candidates.size(),record.worldMinimum,record.worldMaximum});
+                }
+                cache.candidates.push_back({handle, asset, EntityUsesTransparency(_registry, handle),cullable,minimum,maximum});
+            }
+            cache.visibility.Update(cache.staticBounds);
+            // Bound memory across entity churn, including generation-bearing handles.
+            for (auto it = cache.frameMatrices.begin(); it != cache.frameMatrices.end();)
+                if (it->second.frame != cache.preparationFrame) it = cache.frameMatrices.erase(it);
+                else ++it;
+            m_stereoPrepared = m_stereoFrame;
+        }
 
         if (!m_shader->IsLinked())
         {
@@ -1369,42 +1444,31 @@ namespace Canis
         Shader *currentShader = nullptr;
 
         auto modelView = _registry.view<Transform, Model>();
-        std::vector<TransparentModelEntry> opaqueEntities = {};
-        std::vector<TransparentModelEntry> transparentEntities = {};
+        auto& opaqueEntities=m_batchCache->opaqueScratch;
+        auto& transparentEntities=m_batchCache->transparentScratch;
+        opaqueEntities.clear();transparentEntities.clear();
         opaqueEntities.reserve(modelView.size_hint());
         transparentEntities.reserve(modelView.size_hint());
 
-        for (const entt::entity entityHandle : modelView)
+        const Matrix4 clip=projection*view;
+        m_batchCache->visibility.Query(clip,m_batchCache->candidates.size(),m_batchCache->hiddenCandidates);
+        size_t candidateIndex=0;
+        for (const auto& candidate : m_batchCache->candidates)
         {
+            const bool hidden=m_batchCache->hiddenCandidates[candidateIndex++];
+            const auto entityHandle = candidate.handle;
             Transform &transform = modelView.get<Transform>(entityHandle);
             Model &modelRenderer = modelView.get<Model>(entityHandle);
-            Entity *entity = modelRenderer.entity;
-            if (entity == nullptr)
-                entity = transform.entity;
+            ModelAsset *model = candidate.asset;
 
-            if ((entity != nullptr && !entity->Active()) ||
-                !transform.IsActiveInHierarchy() ||
-                modelRenderer.modelId < 0)
-                continue;
-            if (const BlockoutShape *blockout = _registry.try_get<BlockoutShape>(entityHandle))
-            {
-                if (!blockout->active ||
-                    (!blockout->visibleInGame && !scene->HasEditorCamera3DOverride()))
-                    continue;
-            }
-
-            ModelAsset *model = AssetManager::GetModel(modelRenderer.modelId);
-            if (model == nullptr)
-                continue;
-
-            if (OutsideView(_registry,entityHandle,*model,modelRenderer,RenderMatrix(entityHandle,transform),projection*view,m_shader)) {
+            if (hidden || (candidate.cullable && BoundsOutsideFrustum(clip*RenderMatrix(entityHandle,transform),candidate.minimum,candidate.maximum))) {
                 RenderMetrics::Cull(false);continue;
             }
 
             const Vector3 offset = Vector3(RenderMatrix(entityHandle,transform)[3]) - cameraPosition;
             const float distanceSquared = glm::dot(offset, offset);
 
-            if (EntityUsesTransparency(_registry, entityHandle))
+            if (candidate.transparent)
             {
                 transparentEntities.push_back(TransparentModelEntry{
                     .entityHandle = entityHandle,
