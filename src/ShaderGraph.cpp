@@ -890,7 +890,7 @@ uniform vec3 directionalLightDirection;
 uniform vec3 directionalLightColor;
 uniform float directionalLightIntensity;
 uniform mat4 directionalLightSpaceMatrix;
-uniform sampler2D directionalShadowMap;
+uniform highp sampler2DShadow directionalShadowMap;
 uniform int pointLightCount;
 uniform vec3 pointLightPositions[8];
 uniform vec3 pointLightColors[8];
@@ -901,12 +901,8 @@ float sgShadow(vec3 n, vec3 l) {
     vec4 p=directionalLightSpaceMatrix*vec4(fragmentWorldPos,1.0);
     vec3 q=p.xyz/max(p.w,0.00001)*0.5+0.5;
     if(any(lessThan(q,vec3(0.0))) || any(greaterThan(q,vec3(1.0))))return 1.0;
-    float bias=max(0.0008*(1.0-dot(n,l)),0.0006);
-    vec2 texel=1.0/vec2(textureSize(directionalShadowMap,0));
-    float visibility=0.0;
-    for(int y=-1;y<=1;++y)for(int x=-1;x<=1;++x)
-        visibility+=q.z-bias<=texture(directionalShadowMap,q.xy+vec2(float(x),float(y))*texel).r?1.0:0.0;
-    return visibility/9.0;
+    float bias=max(0.00005*(1.0-clamp(dot(n,l),0.0,1.0)),0.00001);
+    return texture(directionalShadowMap,vec3(q.xy,q.z-bias));
 }
 float sgBand(float value,float bands) {
     float steps=max(floor(bands),2.0)-1.0;

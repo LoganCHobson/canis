@@ -69,7 +69,7 @@ namespace Canis::VR
             XrSpace gazeSpace = XR_NULL_HANDLE;
             XrAction gripAction = XR_NULL_HANDLE, aimAction = XR_NULL_HANDLE;
             XrAction triggerAction = XR_NULL_HANDLE, squeezeAction = XR_NULL_HANDLE;
-            XrAction stickAction = XR_NULL_HANDLE, selectAction = XR_NULL_HANDLE, hapticAction = XR_NULL_HANDLE;
+            XrAction stickAction = XR_NULL_HANDLE, selectAction = XR_NULL_HANDLE, jumpAction = XR_NULL_HANDLE, hapticAction = XR_NULL_HANDLE;
             std::array<XrPath, 2> handPaths{};
             std::array<XrSpace, 2> grips{}, aims{};
             std::array<Chain, 2> chains{};
@@ -107,6 +107,7 @@ namespace Canis::VR
                 squeezeAction = Action("squeeze", "Grab", XR_ACTION_TYPE_FLOAT_INPUT);
                 stickAction = Action("thumbstick", "Locomotion", XR_ACTION_TYPE_VECTOR2F_INPUT);
                 selectAction = Action("select", "Select", XR_ACTION_TYPE_BOOLEAN_INPUT);
+                jumpAction = Action("jump", "Jump", XR_ACTION_TYPE_BOOLEAN_INPUT);
                 hapticAction = Action("haptic", "Haptic feedback", XR_ACTION_TYPE_VIBRATION_OUTPUT);
                 for (bool simple : {false, true})
                 {
@@ -123,6 +124,7 @@ namespace Canis::VR
                             add(triggerAction, "/input/trigger/value"); add(squeezeAction, "/input/squeeze/value");
                             add(stickAction, "/input/thumbstick");
                             add(selectAction, i == 0 ? "/input/x/click" : "/input/a/click");
+                            if (i == 1) add(jumpAction, "/input/b/click");
                         }
                     }
                     XrInteractionProfileSuggestedBinding info{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
@@ -277,6 +279,10 @@ namespace Canis::VR
                     XrActionStateBoolean select{XR_TYPE_ACTION_STATE_BOOLEAN};
                     Check(xrGetActionStateBoolean(session, &info, &select), "xrGetActionStateBoolean");
                     hand.select = select.isActive && select.currentState;
+                    info.action = jumpAction;
+                    XrActionStateBoolean jump{XR_TYPE_ACTION_STATE_BOOLEAN};
+                    Check(xrGetActionStateBoolean(session, &info, &jump), "xrGetActionStateBoolean(jump)");
+                    hand.jump = jump.isActive && jump.currentState;
                 }
             }
         public:

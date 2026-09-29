@@ -28,7 +28,7 @@ namespace Canis
     namespace
     {
         constexpr int kMaxPointLights = 8;
-        constexpr int kDirectionalShadowMapSize = 2048;
+        constexpr int kDirectionalShadowMapSize = 4096;
 
         static const float kSkyboxVertices[] = {
             -1.0f,  1.0f, -1.0f,
@@ -972,8 +972,10 @@ namespace Canis
             GL_DEPTH_COMPONENT,
             GL_UNSIGNED_INT,
             nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
         #if defined(__EMSCRIPTEN__)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1047,9 +1049,17 @@ namespace Canis
             : worldUp;
         const float shadowExtent = std::clamp(_cameraFarClip * 0.1f, 20.0f, 120.0f);
         const float shadowDistance = std::max(50.0f, shadowExtent * 2.0f);
-        const Vector3 lightPosition = _cameraPosition - (_directionalLightDirection * shadowDistance);
+        // Snap the camera-centered volume in a fixed light basis. This keeps
+        // world-space shadow texels stationary during sub-texel camera motion.
+        const Matrix4 lightOrientation = glm::lookAt(Vector3(0.0f), _directionalLightDirection, lightUp);
+        Vector3 centerInLight = Vector3(lightOrientation * Vector4(_cameraPosition, 1.0f));
+        const float worldUnitsPerTexel = (shadowExtent * 2.0f) / kDirectionalShadowMapSize;
+        centerInLight.x = std::round(centerInLight.x / worldUnitsPerTexel) * worldUnitsPerTexel;
+        centerInLight.y = std::round(centerInLight.y / worldUnitsPerTexel) * worldUnitsPerTexel;
+        const Vector3 shadowCenter = Vector3(glm::inverse(lightOrientation) * Vector4(centerInLight, 1.0f));
+        const Vector3 lightPosition = shadowCenter - (_directionalLightDirection * shadowDistance);
 
-        const Matrix4 lightView = glm::lookAt(lightPosition, _cameraPosition, lightUp);
+        const Matrix4 lightView = glm::lookAt(lightPosition, shadowCenter, lightUp);
         const Matrix4 lightProjection = glm::ortho(
             -shadowExtent,
             shadowExtent,
@@ -1081,10 +1091,12 @@ namespace Canis
 
         glEnable(GL_DEPTH_TEST);
         glDisable(GL_BLEND);
-        glEnable(GL_CULL_FACE);
-        glCullFace(GL_FRONT);
+        // Thin/open roof and wall meshes must cast from either side. Front-face
+        // culling stores the far side of closed meshes and drops single-sided roofs.
+        glDisable(GL_CULL_FACE);
         glEnable(GL_POLYGON_OFFSET_FILL);
-        glPolygonOffset(0.6f, 1.0f);
+        // Cover the depth slope within the bilinear filter footprint.
+        glPolygonOffset(1.1f, 1.0f);
 
         m_shadowShader->Use();
         m_shadowShader->SetMat4("lightSpaceMatrix", m_shadowLightSpaceMatrix);

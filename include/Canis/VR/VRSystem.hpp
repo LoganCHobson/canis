@@ -33,6 +33,7 @@ namespace Canis::VR
         float squeeze = 0.0f;
         Vector2 stick{0.0f};
         bool select = false;
+        bool jump = false;
         bool active = false;
     };
     struct Eye

@@ -948,6 +948,7 @@ namespace Canis
         if (m_lastControllerID < m_gameControllers.size() && m_gameControllers[m_lastControllerID].originalSteamController)
             m_actions.SetGlyphFamily("steam_controller");
         // The SDL Steam family spans several models; native Steam origins select their own glyphs.
+        if (actionInputProvider) actionInputProvider(m_actions);
         m_actions.Evaluate(available);
     }
 } // namespace Canis

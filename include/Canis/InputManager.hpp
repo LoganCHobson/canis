@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <optional>
+#include <functional>
 #include <unordered_map>
 #include <unordered_set>
 #include <Canis/Data/Key.hpp>
@@ -100,6 +101,8 @@ namespace Canis
         template<class T> requires InputActionEnum<T>::value
         InputPrompt Prompt(T id, InputScheme scheme) const { return m_actions.Prompt({static_cast<uint32_t>(id)}, scheme); }
         void EvaluateActions(bool gameplayActive = true);
+        // Optional game-owned device feed, sampled before action edge evaluation.
+        std::function<void(InputActionSystem&)> actionInputProvider;
         GameControllerType GetControllerType() const;
         bool Update(void* _window);
         void BeginSyntheticInputFrame();
