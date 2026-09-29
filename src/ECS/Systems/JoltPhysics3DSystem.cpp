@@ -34,8 +34,8 @@
 #include <memory>
 #include <mutex>
 #include <type_traits>
+#include <tuple>
 #include <unordered_map>
-#include <unordered_set>
 #include <thread>
 #include <vector>
 
@@ -400,99 +400,64 @@ namespace Canis
             return true;
         }
 
-        size_t BuildSettingsHash(
-            entt::registry &_registry,
-            entt::entity _entityHandle,
-            const Transform &_transform,
-            const Rigidbody &_rigidbody,
-            const BoxCollider *_boxCollider,
-            const SphereCollider *_sphereCollider,
-            const CapsuleCollider *_capsuleCollider,
-            const MeshCollider *_meshCollider,
-            const ConvexMeshCollider *_convexMeshCollider)
+        auto RigidbodySettings(const Rigidbody& body)
         {
-            size_t hash = 0;
-            hash = HashCombine(hash, std::hash<int>{}(_rigidbody.motionType));
-            hash = HashCombine(hash, std::hash<float>{}(_rigidbody.mass));
-            hash = HashCombine(hash, std::hash<float>{}(_rigidbody.friction));
-            hash = HashCombine(hash, std::hash<float>{}(_rigidbody.restitution));
-            hash = HashCombine(hash, std::hash<float>{}(_rigidbody.linearDamping));
-            hash = HashCombine(hash, std::hash<float>{}(_rigidbody.angularDamping));
-            hash = HashCombine(hash, std::hash<bool>{}(_rigidbody.useGravity));
-            hash = HashCombine(hash, std::hash<float>{}(_rigidbody.gravityFactor));
-            hash = HashCombine(hash, std::hash<bool>{}(_rigidbody.isSensor));
-            hash = HashCombine(hash, std::hash<u32>{}(_rigidbody.layer));
-            hash = HashCombine(hash, std::hash<u32>{}(_rigidbody.mask));
-            hash = HashCombine(hash, std::hash<bool>{}(_rigidbody.allowSleeping));
-            hash = HashCombine(hash, std::hash<bool>{}(_rigidbody.lockRotationX));
-            hash = HashCombine(hash, std::hash<bool>{}(_rigidbody.lockRotationY));
-            hash = HashCombine(hash, std::hash<bool>{}(_rigidbody.lockRotationZ));
-            hash = HashCombine(hash, HashVector(glm::abs(_transform.GetGlobalScale())));
-            hash = HashCombine(hash, HashVector(_transform.GetGlobalScale()));
+            return std::make_tuple(body.motionType, body.mass, body.friction, body.restitution,
+                body.linearDamping, body.angularDamping, body.useGravity, body.gravityFactor,
+                body.isSensor, body.layer, body.mask, body.allowSleeping,
+                body.lockRotationX, body.lockRotationY, body.lockRotationZ);
+        }
 
-            if (_boxCollider != nullptr)
-            {
-                hash = HashCombine(hash, 101u);
-                hash = HashCombine(hash, std::hash<bool>{}(_boxCollider->active));
-                hash = HashCombine(hash, HashVector(_boxCollider->offset));
-                hash = HashCombine(hash, HashVector(_boxCollider->size));
-            }
-            else if (_sphereCollider != nullptr)
-            {
-                hash = HashCombine(hash, 102u);
-                hash = HashCombine(hash, std::hash<bool>{}(_sphereCollider->active));
-                hash = HashCombine(hash, HashVector(_sphereCollider->offset));
-                hash = HashCombine(hash, std::hash<float>{}(_sphereCollider->radius));
-            }
-            else if (_capsuleCollider != nullptr)
-            {
-                hash = HashCombine(hash, 103u);
-                hash = HashCombine(hash, std::hash<bool>{}(_capsuleCollider->active));
-                hash = HashCombine(hash, HashVector(_capsuleCollider->offset));
-                hash = HashCombine(hash, std::hash<float>{}(_capsuleCollider->halfHeight));
-                hash = HashCombine(hash, std::hash<float>{}(_capsuleCollider->radius));
-            }
-            else if (_meshCollider != nullptr)
-            {
-                hash = HashCombine(hash, 104u);
-                hash = HashCombine(hash, std::hash<bool>{}(_meshCollider->active));
-                hash = HashCombine(hash, std::hash<bool>{}(_meshCollider->useAttachedModel));
-                hash = HashCombine(hash, std::hash<std::string>{}(_meshCollider->modelPath));
+        // Compare authored values directly: public component fields can change without
+        // an EnTT update signal. Runtime velocities/contact lists are intentionally absent.
+        struct BodySettings
+        {
+            decltype(RigidbodySettings(Rigidbody{})) body;
+            Vector3 worldScale{1.0f};
+            int shape = 0;
+            Vector3 offset{0.0f}, size{1.0f};
+            float radius = 0.0f, halfHeight = 0.0f;
+            bool attached = false, applyNodeTransform = true;
+            std::string modelPath;
+            i32 modelId = -1, nodeIndex = -1;
+            u64 geometryRevision = 0;
+            bool operator==(const BodySettings&) const = default;
+        };
 
-                const i32 modelId = ResolveMeshColliderModelId(_registry, _entityHandle, _meshCollider);
-                const i32 nodeIndex = ResolveMeshColliderNodeIndex(_registry, _entityHandle, _meshCollider);
-                const bool applyNodeTransform = ResolveMeshColliderApplyNodeTransform(_registry, _entityHandle, _meshCollider);
-                hash = HashCombine(hash, std::hash<int>{}(modelId));
-                hash = HashCombine(hash, std::hash<int>{}(nodeIndex));
-                hash = HashCombine(hash, std::hash<bool>{}(applyNodeTransform));
-                if (const ModelAsset *model = AssetManager::GetModel(modelId))
-                    hash = HashCombine(hash, std::hash<u64>{}(model->GetGeometryRevision()));
+        BodySettings CaptureSettings(entt::registry& registry, entt::entity handle,
+            const Vector3& worldScale, const Rigidbody& body,
+            const BoxCollider* box, const SphereCollider* sphere, const CapsuleCollider* capsule,
+            const MeshCollider* mesh, const ConvexMeshCollider* convex)
+        {
+            BodySettings settings;
+            settings.body = RigidbodySettings(body);
+            settings.worldScale = worldScale;
+            if (box) {
+                settings.shape = 1; settings.offset = box->offset; settings.size = box->size;
+            } else if (sphere) {
+                settings.shape = 2; settings.offset = sphere->offset; settings.radius = sphere->radius;
+            } else if (capsule) {
+                settings.shape = 3; settings.offset = capsule->offset;
+                settings.radius = capsule->radius; settings.halfHeight = capsule->halfHeight;
+            } else if (mesh) {
+                settings.shape = 4; settings.attached = mesh->useAttachedModel;
+                settings.modelPath = mesh->modelPath;
+                settings.modelId = ResolveMeshColliderModelId(registry, handle, mesh);
+                settings.nodeIndex = ResolveMeshColliderNodeIndex(registry, handle, mesh);
+                settings.applyNodeTransform = ResolveMeshColliderApplyNodeTransform(registry, handle, mesh);
+            } else if (convex) {
+                settings.shape = 5; settings.attached = convex->useAttachedModel;
+                settings.modelPath = convex->modelPath;
+                settings.offset = convex->offset; settings.size = convex->scale;
+                settings.radius = convex->convexRadius;
+                settings.modelId = ResolveConvexMeshColliderModelId(registry, handle, convex);
+                settings.nodeIndex = ResolveConvexMeshColliderNodeIndex(registry, handle, convex);
+                settings.applyNodeTransform = ResolveConvexMeshColliderApplyNodeTransform(registry, handle, convex);
             }
-            else if (_convexMeshCollider != nullptr)
-            {
-                hash = HashCombine(hash, 105u);
-                hash = HashCombine(hash, std::hash<bool>{}(_convexMeshCollider->active));
-                hash = HashCombine(hash, std::hash<bool>{}(_convexMeshCollider->useAttachedModel));
-                hash = HashCombine(hash, std::hash<std::string>{}(_convexMeshCollider->modelPath));
-                hash = HashCombine(hash, HashVector(_convexMeshCollider->offset));
-                hash = HashCombine(hash, HashVector(_convexMeshCollider->scale));
-                hash = HashCombine(hash, std::hash<float>{}(_convexMeshCollider->convexRadius));
-
-                const i32 modelId = ResolveConvexMeshColliderModelId(_registry, _entityHandle, _convexMeshCollider);
-                const i32 nodeIndex = ResolveConvexMeshColliderNodeIndex(_registry, _entityHandle, _convexMeshCollider);
-                const bool applyNodeTransform = ResolveConvexMeshColliderApplyNodeTransform(_registry, _entityHandle, _convexMeshCollider);
-                hash = HashCombine(hash, std::hash<int>{}(modelId));
-                hash = HashCombine(hash, std::hash<int>{}(nodeIndex));
-                hash = HashCombine(hash, std::hash<bool>{}(applyNodeTransform));
-                if (const ModelAsset *model = AssetManager::GetModel(modelId))
-                    hash = HashCombine(hash, std::hash<u64>{}(model->GetGeometryRevision()));
-            }
-            else
-            {
-                hash = HashCombine(hash, 100u);
-            }
-
-            return hash;
+            if (settings.shape >= 4)
+                if (const auto* model = AssetManager::GetModel(settings.modelId))
+                    settings.geometryRevision = model->GetGeometryRevision();
+            return settings;
         }
 
         JPH::RefConst<JPH::Shape> BuildShape(
@@ -941,7 +906,8 @@ namespace Canis
         struct BodyRuntimeData
         {
             JPH::BodyID bodyID;
-            size_t settingsHash = 0;
+            BodySettings settings;
+            uint64_t seenFrame = 0, syncedWorldRevision = 0;
             Vector3 syncedLocalPosition = Vector3(0.0f);
             Quaternion syncedLocalRotation = Quaternion(Vector3(0.0f));
             bool hasSyncedTransform = false;
@@ -951,6 +917,54 @@ namespace Canis
             Quaternion currentWorldRotation = Quaternion(Vector3(0.0f));
             bool hasPhysicsPose = false;
         };
+
+        struct CachedTransform
+        {
+            uint64_t frame = 0, revision = 0, parentRevision = 0;
+            entt::entity parent = entt::null;
+            Vector3 localPosition{0}, localScale{1}, position{0}, scale{1};
+            Quaternion localRotation{1,0,0,0}, rotation{1,0,0,0};
+            bool prefixEnabled = false;
+            Matrix4 prefix{1}, matrix{1};
+        };
+        std::unordered_map<entt::entity, CachedTransform> transforms;
+        uint64_t syncFrame = 0, transformRevision = 0;
+
+        const CachedTransform& WorldTransform(entt::entity handle, const Transform& transform)
+        {
+            auto& cached = transforms[handle];
+            if (cached.frame == syncFrame) return cached;
+            const CachedTransform* parent = nullptr;
+            entt::entity parentHandle = entt::null;
+            if (transform.parent != nullptr && transform.parent->HasComponent<Transform>()) {
+                parentHandle = transform.parent->GetHandle();
+                parent = &WorldTransform(parentHandle, transform.parent->GetComponent<Transform>());
+            }
+            const auto parentRevision = parent ? parent->revision : 0;
+            if (!cached.revision || cached.parent != parentHandle || cached.parentRevision != parentRevision ||
+                cached.localPosition != transform.position || cached.localRotation != transform.rotation ||
+                cached.localScale != transform.scale || cached.prefixEnabled != transform.useLocalMatrixPrefix ||
+                (transform.useLocalMatrixPrefix && cached.prefix != transform.localMatrixPrefix))
+            {
+                cached.localPosition = transform.position;
+                cached.localRotation = transform.rotation;
+                cached.localScale = transform.scale;
+                cached.parent = parentHandle; cached.parentRevision = parentRevision;
+                cached.prefixEnabled = transform.useLocalMatrixPrefix; cached.prefix = transform.localMatrixPrefix;
+                cached.matrix = parent ? parent->matrix * transform.GetLocalMatrix() : transform.GetLocalMatrix();
+                cached.position = Vector3(cached.matrix[3]);
+                glm::mat3 rotation(cached.matrix);
+                for (int column = 0; column < 3; ++column) {
+                    cached.scale[column] = glm::length(Vector3(rotation[column]));
+                    if (cached.scale[column] > 0.000001f) rotation[column] /= cached.scale[column];
+                }
+                if (glm::determinant(rotation) < 0.0f) rotation[0] = -rotation[0];
+                cached.rotation = glm::normalize(glm::quat_cast(rotation));
+                cached.revision = ++transformRevision;
+            }
+            cached.frame = syncFrame;
+            return cached;
+        }
 
         std::unique_ptr<BPLayerInterfaceImpl> broadPhaseLayerInterface = nullptr;
         std::unique_ptr<ObjectVsBroadPhaseLayerFilterImpl> objectVsBroadPhaseLayerFilter = nullptr;
@@ -1007,6 +1021,7 @@ namespace Canis
             for (auto &entry : bodies)
                 RemoveBodyFromWorld(entry.second.bodyID);
             bodies.clear();
+            transforms.clear();
 
             bodyInterface = nullptr;
             if (contactListener != nullptr)
@@ -1209,21 +1224,14 @@ namespace Canis
                 return false;
             }
 
-            const size_t settingsHash = BuildSettingsHash(
-                _registry,
-                _entityHandle,
-                *transform,
-                *rigidbody,
-                boxCollider,
-                sphereCollider,
-                capsuleCollider,
-                meshCollider,
-                convexMeshCollider);
+            const auto& world = WorldTransform(_entityHandle, *transform);
+            const auto settings = CaptureSettings(_registry, _entityHandle, world.scale, *rigidbody,
+                boxCollider, sphereCollider, capsuleCollider, meshCollider, convexMeshCollider);
             auto bodyIt = bodies.find(_entityHandle);
-            const bool needsRecreate = (bodyIt == bodies.end()) || (bodyIt->second.settingsHash != settingsHash);
-
-            if (!needsRecreate)
+            if (bodyIt != bodies.end() && bodyIt->second.settings == settings) {
+                bodyIt->second.seenFrame = syncFrame;
                 return true;
+            }
 
             if (bodyIt != bodies.end())
                 RemoveBodyFromWorld(bodyIt->second.bodyID);
@@ -1246,8 +1254,8 @@ namespace Canis
             const JPH::EMotionType motionType = ToMotionType(rigidbody->motionType);
             JPH::BodyCreationSettings bodySettings(
                 shape.GetPtr(),
-                ToJoltPosition(transform->GetGlobalPosition()),
-                ToJoltRotation(transform->GetGlobalRotation()),
+                ToJoltPosition(world.position),
+                ToJoltRotation(world.rotation),
                 motionType,
                 ToObjectLayer(motionType));
 
@@ -1287,12 +1295,14 @@ namespace Canis
 
             BodyRuntimeData runtimeData;
             runtimeData.bodyID = bodyID;
-            runtimeData.settingsHash = settingsHash;
+            runtimeData.settings = settings;
+            runtimeData.seenFrame = syncFrame;
+            runtimeData.syncedWorldRevision = world.revision;
             runtimeData.syncedLocalPosition = transform->position;
             runtimeData.syncedLocalRotation = transform->rotation;
             runtimeData.hasSyncedTransform = true;
-            runtimeData.previousWorldPosition = transform->GetGlobalPosition();
-            runtimeData.previousWorldRotation = transform->GetGlobalRotation();
+            runtimeData.previousWorldPosition = world.position;
+            runtimeData.previousWorldRotation = world.rotation;
             runtimeData.currentWorldPosition = runtimeData.previousWorldPosition;
             runtimeData.currentWorldRotation = runtimeData.previousWorldRotation;
             runtimeData.hasPhysicsPose = true;
@@ -1304,7 +1314,7 @@ namespace Canis
         {
             Profiler::Scope timing("Physics body synchronization", Profiler::Category::Physics);
             std::vector<entt::entity> activeBodies = {};
-            std::unordered_set<entt::entity> expected = {};
+            ++syncFrame;
 
             auto rigidbodyView = _registry.view<Rigidbody, Transform>();
             for (const entt::entity entityHandle : rigidbodyView)
@@ -1312,7 +1322,6 @@ namespace Canis
                 if (!EnsureBodyForEntity(_registry, entityHandle))
                     continue;
 
-                expected.insert(entityHandle);
                 activeBodies.push_back(entityHandle);
             }
 
@@ -1321,7 +1330,7 @@ namespace Canis
             for (const auto &entry : bodies)
             {
                 const entt::entity entityHandle = entry.first;
-                if (!_registry.valid(entityHandle) || expected.find(entityHandle) == expected.end())
+                if (entry.second.seenFrame != syncFrame)
                     staleEntities.push_back(entityHandle);
             }
 
@@ -1347,10 +1356,9 @@ namespace Canis
                 // interpolated Transform every pre-step resets that motion before
                 // the next command can accumulate. Only push a kinematic pose
                 // when game/editor code explicitly changed its Transform.
+                const auto& world = transforms.at(entityHandle);
                 const bool staticMoved = motionType == JPH::EMotionType::Static &&
-                    (!runtimeData.hasPhysicsPose ||
-                     !NearlyEqual(transform->GetGlobalPosition(), runtimeData.currentWorldPosition) ||
-                     !NearlyEqual(transform->GetGlobalRotation(), runtimeData.currentWorldRotation));
+                    (!runtimeData.hasPhysicsPose || runtimeData.syncedWorldRevision != world.revision);
                 if (staticMoved || transformEdited)
                 {
                     const JPH::EActivation activation = (motionType == JPH::EMotionType::Static)
@@ -1358,18 +1366,19 @@ namespace Canis
                         : JPH::EActivation::Activate;
                     bodyInterface->SetPositionAndRotation(
                         runtimeData.bodyID,
-                        ToJoltPosition(transform->GetGlobalPosition()),
-                        ToJoltRotation(transform->GetGlobalRotation()),
+                        ToJoltPosition(world.position),
+                        ToJoltRotation(world.rotation),
                         activation);
 
                     runtimeData.syncedLocalPosition = transform->position;
                     runtimeData.syncedLocalRotation = transform->rotation;
                     runtimeData.hasSyncedTransform = true;
-                    runtimeData.previousWorldPosition = transform->GetGlobalPosition();
-                    runtimeData.previousWorldRotation = transform->GetGlobalRotation();
+                    runtimeData.previousWorldPosition = world.position;
+                    runtimeData.previousWorldRotation = world.rotation;
                     runtimeData.currentWorldPosition = runtimeData.previousWorldPosition;
                     runtimeData.currentWorldRotation = runtimeData.previousWorldRotation;
                     runtimeData.hasPhysicsPose = true;
+                    runtimeData.syncedWorldRevision = world.revision;
                 }
 
                 if (motionType == JPH::EMotionType::Dynamic)
@@ -1399,6 +1408,12 @@ namespace Canis
                 }
             }
 
+            // Keep stationary scenery out of pose capture/interpolation, and retire
+            // cached hierarchy nodes no longer used by any live physics body.
+            std::erase_if(activeBodies, [&](entt::entity handle) {
+                return _registry.get<Rigidbody>(handle).motionType == RigidbodyMotionType::STATIC;
+            });
+            std::erase_if(transforms, [&](const auto& entry) { return entry.second.frame != syncFrame; });
             return activeBodies;
         }
 

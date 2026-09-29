@@ -107,6 +107,75 @@ static void StaticEdits()
     step();Check(!hit(4),"Inactive static collider remained in physics");
     child.SetActive(true);
     step();Check(hit(4),"Reactivated static collider missing");
+    // Exercise invalidation after the unchanged-body path has been warmed.
+    collider.size = Vector3(1);
+    transform.position.x = 2;
+    parent.GetComponent<Transform>().scale = Vector3(2);
+    step();Check(hit(8) && !hit(4), "Parent scale did not update child pose/shape");
+    parent.GetComponent<Transform>().rotation = glm::angleAxis(3.14159265f, Vector3(0,1,0));
+    step();Check(hit(0) && !hit(8), "Parent rotation did not update static child");
+    parent.GetComponent<Transform>().rotation = Quaternion(1,0,0,0);
+    parent.GetComponent<Transform>().scale = Vector3(1);
+    transform.SetLocalMatrixPrefix(glm::translate(Matrix4(1), Vector3(3,0,0)));
+    step();Check(hit(9) && !hit(6), "Local matrix prefix was not invalidated");
+    transform.ClearLocalMatrixPrefix();
+    step();Check(hit(6) && !hit(9), "Cleared local matrix prefix was not invalidated");
+    auto otherParent = scene.CreateEntity("Other parent");
+    otherParent.AddComponent<Transform>()->position.x = 12;
+    transform.SetParent(&otherParent);
+    transform.position = Vector3(2,0,0);
+    step();Check(hit(14) && !hit(6), "Reparented static collider kept old world pose");
+    collider.active = false;
+    step();Check(!hit(14), "Disabled collider stayed active");
+    collider.active = true;
+    step();Check(hit(14), "Reenabled collider was not rebuilt");
+    auto& body = child.GetComponent<Rigidbody>();
+    body.active = false;
+    step();Check(!hit(14), "Disabled body stayed active");
+    body.active = true;
+    body.layer = 2u;
+    step();Check(physics.Raycast(Vector3(14,3,0), Vector3(0,-1,0), 6.f, 2u), "Body layer edit was lost");
+    Check(!physics.Raycast(Vector3(14,3,0), Vector3(0,-1,0), 6.f, 1u), "Body layer edit kept old layer");
+    collider.offset.x = 2;
+    step();Check(hit(16) && !hit(14), "Collider offset edit was lost");
+    child.RemoveComponent<BoxCollider>();
+    step();Check(!hit(16), "Removed collider stayed in physics");
+    child.AddComponent<SphereCollider>()->radius = 2;
+    step();Check(hit(15.5f), "Replacement sphere collider was not created");
+    child.GetComponent<SphereCollider>().radius = .25f;
+    step();Check(!hit(15.5f) && hit(14), "Sphere radius edit was lost");
+    body.motionType = RigidbodyMotionType::DYNAMIC;
+    body.useGravity = false;
+    body.linearDamping = 0;
+    body.SetLinearVelocity(Vector3(3,0,0));
+    for (int i=0; i<60; ++i) step();
+    Check(transform.GetGlobalPosition().x > 16, "Static to dynamic edit stopped motion");
+    child.RemoveComponent<Rigidbody>();
+    step();Check(!hit(transform.GetGlobalPosition().x), "Removed body remained in physics");
+}
+
+static void UnchangedKinematicCommands()
+{
+    Scene scene;
+    JoltPhysics3DSystem physics;
+    physics.scene = &scene; physics.Create();
+    auto entity = scene.CreateEntity("Moving platform");
+    auto& transform = *entity.AddComponent<Transform>();
+    auto& body = *entity.AddComponent<Rigidbody>();
+    entity.AddComponent<BoxCollider>();
+    body.motionType = RigidbodyMotionType::KINEMATIC;
+    body.useGravity = false;
+    auto step = [&] { physics.Update(scene.GetRegistry(), 1.f/60.f); };
+    step();
+    for (int i=0; i<60; ++i) { body.Move(Vector3(.05f,0,0)); step(); }
+    Check(transform.position.x > 2.8f, "Unchanged kinematic settings dropped movement commands");
+    body.StopKinematicMotion(); step(); step();
+    const auto stopped = transform.position;
+    for (int i=0; i<10; ++i) step();
+    Check(glm::distance(stopped, transform.position) < .001f, "Kinematic stop was lost");
+    transform.position = Vector3(10,0,0);
+    step(); step();
+    Check(std::abs(transform.position.x - 10) < .001f, "Kinematic teleport was lost");
 }
 
 int main()
@@ -115,6 +184,7 @@ int main()
         for (float dt : {1.f/30.f,1.f/60.f,1.f/144.f}) StepContact(dt);
         RuntimeLocks();
         StaticEdits();
+        UnchangedKinematicCommands();
         std::cout << "Capsule step contact and runtime rotation locks passed\n";
         return 0;
     } catch (const std::exception& error) {
