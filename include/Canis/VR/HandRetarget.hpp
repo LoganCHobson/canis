@@ -22,6 +22,9 @@ namespace Canis::VR
         const auto wristInverse = glm::inverse(glm::normalize(hand[HandJoint::Wrist].pose.orientation));
         const auto boneToJoint = glm::angleAxis(-PI/2, Vector3(1,0,0));
         struct Mapping { std::string_view name; HandJoint joint; };
+        // Keep the authored palm/metacarpals fixed. Runtime metacarpal rotations
+        // describe a different hand's proportions; copying them while retaining
+        // this mesh's translations moves the knuckles and stretches the webbing.
         constexpr Mapping mapping[] = {
             {"wrist", HandJoint::Wrist},
             // The glove has an extra thumb helper before its three phalanges.
@@ -29,13 +32,13 @@ namespace Canis::VR
             {"thumb_proximal", HandJoint::ThumbMetacarpal},
             {"thumb_intermediate", HandJoint::ThumbProximal},
             {"thumb_distal", HandJoint::ThumbDistal},
-            {"index_metacarpal", HandJoint::IndexMetacarpal}, {"index_proximal", HandJoint::IndexProximal},
+            {"index_proximal", HandJoint::IndexProximal},
             {"index_intermediate", HandJoint::IndexIntermediate}, {"index_distal", HandJoint::IndexDistal},
-            {"middle_metacarpal", HandJoint::MiddleMetacarpal}, {"middle_proximal", HandJoint::MiddleProximal},
+            {"middle_proximal", HandJoint::MiddleProximal},
             {"middle_intermediate", HandJoint::MiddleIntermediate}, {"middle_distal", HandJoint::MiddleDistal},
-            {"ring_metacarpal", HandJoint::RingMetacarpal}, {"ring_proximal", HandJoint::RingProximal},
+            {"ring_proximal", HandJoint::RingProximal},
             {"ring_intermediate", HandJoint::RingIntermediate}, {"ring_distal", HandJoint::RingDistal},
-            {"little_metacarpal", HandJoint::LittleMetacarpal}, {"little_proximal", HandJoint::LittleProximal},
+            {"little_proximal", HandJoint::LittleProximal},
             {"little_intermediate", HandJoint::LittleIntermediate}, {"little_distal", HandJoint::LittleDistal}
         };
         const int count = model.GetNodeCount();

@@ -939,8 +939,10 @@ namespace Canis
         }
         m_actions.Record("Mouse/Delta", mouseRel);
         m_actions.Record("Mouse/Wheel", Vector2(m_scrollVertical + m_syntheticScrollVertical, 0));
-        const bool available = gameplayActive && !m_actionEditorCaptured &&
-            (xrFocused || (active && !m_windowWasBackgrounded));
+        // Desktop editor text/keyboard capture must not consume a focused
+        // headset's controllers. Play/pause routing still applies to both.
+        const bool available = gameplayActive &&
+            (xrFocused || (active && !m_windowWasBackgrounded && !m_actionEditorCaptured));
         if (!available && m_actionsWereAvailable && !m_windowWasBackgrounded)
             ClearSyntheticState(InputCancellation::Capture);
         m_actionsWereAvailable = available;
