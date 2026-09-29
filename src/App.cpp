@@ -1005,14 +1005,14 @@ namespace Canis
             return false;
         }
 
-        int EnvironmentDimension(const char *_name, int _fallback, int _minimum)
+        int EnvironmentDimension(const char *_name, int _fallback, int _minimum, int _maximum = 16384)
         {
             const char *value = std::getenv(_name);
             if (value == nullptr || value[0] == '\0')
                 return _fallback;
             char *end = nullptr;
             const long parsed = std::strtol(value, &end, 10);
-            if (end == value || *end != '\0' || parsed < _minimum || parsed > 16384)
+            if (end == value || *end != '\0' || parsed < _minimum || parsed > _maximum)
             {
                 Debug::Warning("Ignoring invalid %s='%s'.", _name, value);
                 return _fallback;
@@ -2021,6 +2021,12 @@ namespace Canis
             VR::Config config;
             config.foveation = runtime.launch.vrFoveation;
             config.mode = runtime.launch.vrSimulated ? VR::Mode::Simulated : VR::Mode::OpenXR;
+            if (runtime.launch.vrSimulated)
+            {
+                config.simulationEyeWidth = EnvironmentDimension("CANIS_VR_SIM_EYE_WIDTH", config.simulationEyeWidth, 16, 4096);
+                config.simulationEyeHeight = EnvironmentDimension("CANIS_VR_SIM_EYE_HEIGHT", config.simulationEyeHeight, 16, 4096);
+                Debug::Log("VR simulation render size: %dx%d per eye", config.simulationEyeWidth, config.simulationEyeHeight);
+            }
             std::string error;
             if (!VR::LoadPlayerSettings("project_settings/vr.canis",config.player,error) ||
                 !VR::LoadPlayerSettings("user_settings/vr.canis",config.player,error))
