@@ -140,6 +140,35 @@ int main()
     Check(managedClicks == 4, "Canceled action incorrectly activated a button");
     app.scene.managedUIAction = {};
 
+    // XR pointer reaches a world-space button without a desktop camera (the VR lobby).
+    auto vrButton = makeButton("VR button");
+    vrButton.AddComponent<Transform>()->position = Vector3(0,0,-4);
+    auto& vrCanvas = *vrButton.AddComponent<Canvas>();
+    vrCanvas.renderMode = CanvasRenderMode::WORLD_SPACE;
+    vrCanvas.interactionDistance = 6;
+    vrCanvas.navigationEnabled = false;
+    auto& vrRect = vrButton.GetComponent<RectTransform>();
+    vrRect.position = Vector2(0); vrRect.size = Vector2(1);
+    auto& pointer = input.worldUIPointer;
+    pointer.enabled = pointer.active = pointer.moved = true;
+    frame();
+    Check(vrButton.GetComponent<UIButton>().hovered, "XR ray did not highlight a distant button without a camera");
+    const int beforeVR = listener->clicks;
+    pointer.down = pointer.pressed = true; frame();
+    pointer.pressed = false; frame();
+    Check(vrButton.GetComponent<UIButton>().pressed && listener->clicks == beforeVR, "XR trigger activated before release");
+    pointer.down = false; pointer.released = true; frame();
+    Check(listener->clicks == beforeVR+1, "XR trigger release did not activate the pointed button");
+    pointer.released = false; frame();
+    Check(listener->clicks == beforeVR+1, "XR pointer repeated a click");
+    pointer.down = pointer.pressed = true; frame();
+    pointer.active = false; pointer.pressed = pointer.down = false; frame();
+    pointer.active = true; pointer.released = true; frame();
+    Check(listener->clicks == beforeVR+1, "Tracking loss dispatched a stale XR click");
+    pointer.released = false; pointer.direction = Vector3(1,0,0); frame();
+    Check(!vrButton.GetComponent<UIButton>().hovered, "Parallel XR ray highlighted a button");
+    pointer = {}; vrButton.Destroy();
+
     // UIInputField owns SDL text entry for native and managed focus requests.
     auto fieldEntity = app.scene.CreateEntity("Editable text");
     fieldEntity.AddComponent<RectTransform>()->position = Vector2(1000);

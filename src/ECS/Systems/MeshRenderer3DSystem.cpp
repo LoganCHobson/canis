@@ -1345,14 +1345,19 @@ namespace Canis
         DirectionalLightState directionalLight = GatherDirectionalLight(_registry);
         std::vector<PointLightState> pointLights = GatherPointLights(_registry);
 
-        RenderDirectionalShadowMap(
-            _registry,
-            projection,
-            view,
-            cameraPosition,
-            cameraFarClip,
-            directionalLight.direction,
-            directionalLight.enabled);
+        const bool stereo = m_stereoFrame && scene->GetVRCamera().enabled;
+        if (!stereo || !m_stereoShadowReady)
+        {
+            RenderDirectionalShadowMap(
+                _registry,
+                projection,
+                view,
+                stereo ? m_stereoShadowCenter : cameraPosition,
+                cameraFarClip,
+                directionalLight.direction,
+                directionalLight.enabled);
+            if (stereo) m_stereoShadowReady = true;
+        }
 
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LESS);

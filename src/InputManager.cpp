@@ -894,7 +894,7 @@ namespace Canis
         return m_actions.Action(id, uint64_t(m_gameControllers[controllerIndex].joyId) + 2);
     }
 
-    void InputManager::EvaluateActions(bool gameplayActive)
+    void InputManager::EvaluateActions(bool gameplayActive, bool xrFocused)
     {
         std::vector<uint64_t> steamHandles;
         for (const auto& pad : m_gameControllers)
@@ -939,7 +939,8 @@ namespace Canis
         }
         m_actions.Record("Mouse/Delta", mouseRel);
         m_actions.Record("Mouse/Wheel", Vector2(m_scrollVertical + m_syntheticScrollVertical, 0));
-        const bool available = active && gameplayActive && !m_windowWasBackgrounded && !m_actionEditorCaptured;
+        const bool available = gameplayActive && !m_actionEditorCaptured &&
+            (xrFocused || (active && !m_windowWasBackgrounded));
         if (!available && m_actionsWereAvailable && !m_windowWasBackgrounded)
             ClearSyntheticState(InputCancellation::Capture);
         m_actionsWereAvailable = available;

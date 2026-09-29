@@ -100,9 +100,14 @@ namespace Canis
         std::vector<InputBinding> Bindings(T id) const { return m_actions.Bindings({static_cast<uint32_t>(id)}); }
         template<class T> requires InputActionEnum<T>::value
         InputPrompt Prompt(T id, InputScheme scheme) const { return m_actions.Prompt({static_cast<uint32_t>(id)}, scheme); }
-        void EvaluateActions(bool gameplayActive = true);
+        // A focused XR session can own gameplay input while the mirror window is unfocused.
+        void EvaluateActions(bool gameplayActive = true, bool xrFocused = false);
         // Optional game-owned device feed, sampled before action edge evaluation.
         std::function<void(InputActionSystem&)> actionInputProvider;
+        struct WorldUIPointer {
+            bool enabled = false, active = false, down = false, pressed = false, released = false, moved = false, hovered = false;
+            Vector3 origin{0}, direction{0,0,-1};
+        } worldUIPointer;
         GameControllerType GetControllerType() const;
         bool Update(void* _window);
         void BeginSyntheticInputFrame();

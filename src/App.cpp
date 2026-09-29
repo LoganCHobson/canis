@@ -2341,7 +2341,9 @@ namespace Canis
             runGameTick = (editor.m_mode == EditorMode::PLAY);
 #endif
 
-        inputManager.EvaluateActions(runGameTick);
+        const bool xrFocused = runtime.vr && runtime.vr->GetState().focused &&
+            runtime.vr->GetState().shouldRender && runtime.vr->GetState().head.valid;
+        inputManager.EvaluateActions(runGameTick, xrFocused);
 #if CANIS_CSHARP
         if (m_csharp)
         {
@@ -2446,6 +2448,11 @@ namespace Canis
         {
             const int width = window.GetScreenWidth(), height = window.GetScreenHeight();
             std::string error;
+            auto* stereoRenderer = scene.GetSystem<MeshRenderer3DSystem>();
+            const auto& eyes = runtime.vr->GetState().eyes;
+            const Vector3 shadowCenter = (runtime.vr->WorldPose(eyes[0].pose).position +
+                runtime.vr->WorldPose(eyes[1].pose).position) * 0.5f;
+            if (stereoRenderer) stereoRenderer->BeginStereoFrame(shadowCenter);
             const bool rendered = runtime.vr->RenderAndEndFrame(
                 [&](const VR::Eye& eye, const Matrix4& view, unsigned int framebuffer)
                 {
@@ -2463,6 +2470,8 @@ namespace Canis
                             ui->Update(scene.GetRegistry(), deltaTime);
                     }
                 }, error);
+            // Also reset after skipped/failed XR frames; desktop/editor renders own their map.
+            if (stereoRenderer) stereoRenderer->EndStereoFrame();
             scene.ClearVRCamera();
             window.SetRenderSize(width, height);
             if (!rendered)

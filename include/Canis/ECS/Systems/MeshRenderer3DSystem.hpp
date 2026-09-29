@@ -18,7 +18,19 @@ namespace Canis
         void Update(entt::registry &_registry, float _deltaTime) override;
         void OnDestroy() override;
 
+        // Share the light-space map across eye renders, refreshing on every stereo frame.
+        void BeginStereoFrame(const Vector3& shadowCenter)
+        {
+            m_stereoFrame = true;
+            m_stereoShadowReady = false;
+            m_stereoShadowCenter = shadowCenter;
+        }
+        void EndStereoFrame() { m_stereoFrame = m_stereoShadowReady = false; }
+
     private:
+        bool m_stereoFrame = false;
+        bool m_stereoShadowReady = false;
+        Vector3 m_stereoShadowCenter{0.0f};
         std::shared_ptr<MeshRendererCache> m_batchCache;
         const Matrix4& RenderMatrix(entt::entity handle, const Transform& transform);
         static constexpr int kMaxPointLights = 8;

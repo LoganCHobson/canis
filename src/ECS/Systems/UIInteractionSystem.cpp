@@ -71,6 +71,13 @@ namespace Canis
                 return false;
             }
 
+            Ray ray = {};
+            const auto& pointer = _scene.GetInputManager().worldUIPointer;
+            if (pointer.enabled) {
+                if (!pointer.active) return false;
+                ray.origin = pointer.origin;
+                ray.direction = pointer.direction;
+            } else {
             Entity *cameraEntity = nullptr;
             auto cameraView = _registry.view<Camera, Transform>();
             for (const entt::entity cameraHandle : cameraView)
@@ -94,7 +101,6 @@ namespace Canis
             if (cameraEntity == nullptr)
                 return false;
 
-            Ray ray = {};
             const Vector2 rayPosition = _scene.GetWindow().IsMouseLocked()
                 ? Vector2(
                     _scene.GetWindow().GetScreenWidth() * 0.5f,
@@ -103,6 +109,7 @@ namespace Canis
             if (!_scene.TryGetRayFromCamera(*cameraEntity, rayPosition, ray))
                 return false;
 
+            }
             const Matrix4 model =
                 canvas->entity->GetComponent<Transform>().GetModelMatrix();
             const Vector3 planePoint = Vector3(model * Vector4(0.0f, 0.0f, 0.0f, 1.0f));
@@ -349,10 +356,15 @@ namespace Canis
         if (scene == nullptr || scene->app == nullptr || inputManager == nullptr || window == nullptr)
             return;
 
+        const auto& pointer = inputManager->worldUIPointer;
+        const bool pointerPressed = pointer.enabled ? pointer.pressed : inputManager->JustLeftClicked();
+        const bool pointerDown = pointer.enabled ? pointer.down : inputManager->GetLeftClick();
+        const bool pointerReleased = pointer.enabled ? pointer.released : inputManager->LeftClickReleased();
+        if (pointer.enabled && !pointer.active) m_pressedButton = nullptr;
         const bool wasEditingText = m_textInputActive;
         if (m_textInputActive && (!m_focusedInputField || !inputManager->active))
             FocusInputField(nullptr);
-        if (inputManager->mouseRel != Vector2(0.0f) || inputManager->JustLeftClicked())
+        if ((!pointer.enabled && inputManager->mouseRel != Vector2(0.0f)) || pointerPressed)
         {
             m_navigationFocus = false;
             m_navigationPressedButton = nullptr;
@@ -464,7 +476,7 @@ namespace Canis
 
             const bool visible = button.active && rect.IsActiveInHierarchy();
             button.hovered = false;
-            button.pressed = visible && (m_pressedButton == entity) && inputManager->GetLeftClick();
+            button.pressed = visible && (m_pressedButton == entity) && pointerDown;
             ApplyButtonVisual(*entity, button, rect);
         }
 
@@ -590,7 +602,7 @@ namespace Canis
             auto& dragRect = m_dragSource->GetComponent<RectTransform>();
             auto& dragSource = m_dragSource->GetComponent<UIDragSource>();
 
-            if (dragSource.dragging && inputManager->GetLeftClick())
+            if (dragSource.dragging && pointerDown)
                 dragRect.SetPosition(GetCenteredMousePosition(*scene) - dragSource.dragOffset);
 
             auto dropView = _registry.view<RectTransform, UIDropTarget>();
@@ -608,6 +620,12 @@ namespace Canis
         }
 
         Entity navigationPointerButton = hoveredButton;
+        inputManager->worldUIPointer.hovered = pointer.enabled && hoveredButton != nullptr;
+        if (pointer.enabled && pointer.moved && hoveredButton && hoveredButton != m_selectedButton)
+        {
+            m_navigationFocus = false;
+            m_navigationPressedButton = nullptr;
+        }
         if (hoveredButton != nullptr && hoveredButton->HasComponents<RectTransform, UIButton>())
         {
             UIButton& button = hoveredButton->GetComponent<UIButton>();
@@ -633,7 +651,7 @@ namespace Canis
 
         if (m_dragSource == nullptr)
         {
-            if (inputManager->JustLeftClicked())
+            if (pointerPressed)
             {
                 FocusInputField(hoveredInputField);
 
@@ -652,7 +670,7 @@ namespace Canis
                     m_pressedButton = hoveredButton;
                 }
             }
-            else if (m_pressedButton != nullptr && inputManager->LeftClickReleased())
+            else if (m_pressedButton != nullptr && pointerReleased)
             {
                 if (m_pressedButton == hoveredButton && m_pressedButton->HasComponent<UIButton>())
                 {
@@ -668,7 +686,7 @@ namespace Canis
                 m_pressedButton = nullptr;
             }
         }
-        else if (m_dragSource->HasComponents<RectTransform, UIDragSource>() && inputManager->LeftClickReleased())
+        else if (m_dragSource->HasComponents<RectTransform, UIDragSource>() && pointerReleased)
         {
             UIDragSource& dragSource = m_dragSource->GetComponent<UIDragSource>();
             RectTransform& dragRect = m_dragSource->GetComponent<RectTransform>();
