@@ -30,8 +30,12 @@ else()
 endif()
 
 set(CANIS_ENGINE_LIBRARY_TYPE SHARED)
-if(CANIS_PLATFORM_WEB)
+if(CANIS_PLATFORM_WEB OR CANIS_PLATFORM_ANDROID)
     set(CANIS_ENGINE_LIBRARY_TYPE STATIC)
+endif()
+
+if(CANIS_ENABLE_CSHARP AND CANIS_PLATFORM_ANDROID)
+    message(FATAL_ERROR "C# scripting is unavailable on Android builds. Set CANIS_ENABLE_CSHARP=OFF.")
 endif()
 
 if(NOT CANIS_ENABLE_CSHARP OR CANIS_PLATFORM_WEB)
@@ -84,10 +88,20 @@ if(CANIS_ENABLE_EDITOR)
     )
 endif()
 
-if(NOT CANIS_PLATFORM_WEB)
+if(NOT CANIS_PLATFORM_WEB AND NOT CANIS_PLATFORM_ANDROID)
     target_link_libraries(${CANIS_ENGINE_LIB}
         PRIVATE
         libglew_static
+    )
+endif()
+
+if(CANIS_PLATFORM_ANDROID)
+    target_link_libraries(${CANIS_ENGINE_LIB}
+        PRIVATE
+        GLESv3
+        EGL
+        android
+        log
     )
 endif()
 
@@ -167,7 +181,12 @@ if(BUILD_TESTING AND NOT CANIS_PLATFORM_WEB)
     add_test(NAME CanisBlockoutGeometryTests COMMAND CanisBlockoutGeometryTests)
 endif()
 
-add_executable(${PROJECT_NAME} main.cpp)
+if(CANIS_PLATFORM_ANDROID)
+    # SDLActivity loads the game as libmain.so and calls SDL_main from Java.
+    add_library(${PROJECT_NAME} SHARED main.cpp)
+else()
+    add_executable(${PROJECT_NAME} main.cpp)
+endif()
 
 target_include_directories(${PROJECT_NAME}
     PUBLIC
@@ -196,7 +215,7 @@ if(CANIS_ENABLE_EDITOR)
     )
 endif()
 
-if(NOT CANIS_PLATFORM_WEB)
+if(NOT CANIS_PLATFORM_WEB AND NOT CANIS_PLATFORM_ANDROID)
     target_link_libraries(${PROJECT_NAME}
         PRIVATE
         libglew_static
@@ -242,6 +261,28 @@ if(CANIS_PLATFORM_WEB)
     file(GLOB_RECURSE CANIS_WEB_ASSETS CONFIGURE_DEPENDS "${CANIS_BUILD_ASSETS_DIRECTORY}/*")
     set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
         ${CANIS_WEB_ASSETS} "${CANIS_PROJECT_CONFIG}")
+endif()
+
+if(CANIS_PLATFORM_ANDROID)
+    set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME main)
+
+    # Gradle packages this directory as APK assets. The runtime mirrors it into
+    # internal storage on launch, the Android counterpart of --preload-file.
+    set(CANIS_ANDROID_ASSETS_DIRECTORY "${CMAKE_BINARY_DIR}/android-assets" CACHE PATH
+        "Directory Gradle packages as APK assets")
+    if(NOT CANIS_BUILD_ASSETS_DIRECTORY)
+        set(CANIS_BUILD_ASSETS_DIRECTORY "${CMAKE_SOURCE_DIR}/project/assets")
+    endif()
+    # Runs on every build so asset-only changes are packaged without a relink.
+    add_custom_target(CanisAndroidAssets ALL
+        COMMAND ${CMAKE_COMMAND}
+            -DASSETS_DIR=${CANIS_BUILD_ASSETS_DIRECTORY}
+            -DSETTINGS_DIR=${CANIS_BUILD_SETTINGS_DIRECTORY}
+            -DPROJECT_CONFIG=${CANIS_PROJECT_CONFIG}
+            -DOUTPUT_DIR=${CANIS_ANDROID_ASSETS_DIRECTORY}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/AndroidAssets.cmake
+        VERBATIM)
+    add_dependencies(${PROJECT_NAME} CanisAndroidAssets)
 endif()
 
 target_precompile_headers(${PROJECT_NAME}

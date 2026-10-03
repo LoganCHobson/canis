@@ -914,7 +914,7 @@ namespace Canis
         {
             static std::string resolvedPath;
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__ANDROID__)
             return "";
 #else
 #if defined(_WIN32)
@@ -947,6 +947,90 @@ namespace Canis
             return resolvedPath.c_str();
 #endif
         }
+
+#if defined(__ANDROID__)
+        // Android keeps assets inside the APK, where std::ifstream and
+        // std::filesystem cannot reach them. Mirror the packaged files into
+        // internal storage and run from there, like the web preload. The
+        // mirror is rebuilt only when canis_files.txt changes.
+        bool MirrorAndroidAssets()
+        {
+            const char *internalPath = SDL_GetAndroidInternalStoragePath();
+            if (internalPath == nullptr)
+            {
+                Debug::Error("Android internal storage is unavailable: %s", SDL_GetError());
+                return false;
+            }
+
+            size_t manifestSize = 0;
+            void *manifestData = SDL_LoadFile("canis_files.txt", &manifestSize);
+            if (manifestData == nullptr)
+            {
+                Debug::Error("Packaged asset list is missing: %s", SDL_GetError());
+                return false;
+            }
+            const std::string manifest(static_cast<const char *>(manifestData), manifestSize);
+            SDL_free(manifestData);
+
+            const fs::path root = fs::path(internalPath) / "project";
+            const fs::path mirroredManifestPath = root / "canis_files.txt";
+            std::error_code ec;
+
+            std::ifstream mirroredManifestFile(mirroredManifestPath, std::ios::binary);
+            const std::string mirroredManifest((std::istreambuf_iterator<char>(mirroredManifestFile)), {});
+            mirroredManifestFile.close();
+
+            if (mirroredManifest != manifest)
+            {
+                Debug::Log("Mirroring packaged assets into %s", root.generic_string().c_str());
+                fs::remove_all(root, ec);
+
+                std::istringstream lines(manifest);
+                std::string line;
+                while (std::getline(lines, line))
+                {
+                    // Each line is "<md5> <path>"; CMake writes CRLF when the
+                    // build runs on Windows.
+                    if (!line.empty() && line.back() == '\r')
+                        line.pop_back();
+                    const size_t separator = line.find(' ');
+                    if (separator == std::string::npos)
+                        continue;
+
+                    const std::string relativePath = line.substr(separator + 1);
+                    size_t fileSize = 0;
+                    void *fileData = SDL_LoadFile(relativePath.c_str(), &fileSize);
+                    if (fileData == nullptr)
+                    {
+                        Debug::Error("Failed to read packaged asset %s: %s", relativePath.c_str(), SDL_GetError());
+                        return false;
+                    }
+
+                    const fs::path target = root / relativePath;
+                    fs::create_directories(target.parent_path(), ec);
+                    std::ofstream output(target, std::ios::binary);
+                    output.write(static_cast<const char *>(fileData), static_cast<std::streamsize>(fileSize));
+                    SDL_free(fileData);
+                    if (!output)
+                    {
+                        Debug::Error("Failed to write mirrored asset %s", target.generic_string().c_str());
+                        return false;
+                    }
+                }
+
+                // Written last so an interrupted mirror is redone next launch.
+                std::ofstream(mirroredManifestPath, std::ios::binary) << manifest;
+            }
+
+            fs::current_path(root, ec);
+            if (ec)
+            {
+                Debug::Error("Failed to enter mirrored project %s", root.generic_string().c_str());
+                return false;
+            }
+            return true;
+        }
+#endif
 
         bool HasAssetsFolder(const fs::path &_path)
         {
@@ -2845,6 +2929,11 @@ namespace Canis
                 return 2;
             }
         }
+#endif
+
+#if defined(__ANDROID__)
+        if (!MirrorAndroidAssets())
+            return 1;
 #endif
 
         InitializeRuntime();

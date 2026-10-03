@@ -6,6 +6,10 @@
 #include <cstdlib>
 #include <mutex>
 
+#if defined(__ANDROID__)
+#include <android/log.h>
+#endif
+
 namespace Canis::Debug {
 namespace
 {
@@ -67,7 +71,19 @@ namespace
         //if (GetProjectConfig().log == false)
         //    return;
 
+#if defined(__ANDROID__)
+        // Android discards stdout; send the log to logcat (adb logcat -s Canis).
+        int priority = ANDROID_LOG_INFO;
+        if (_level == LogLevel::Warning)
+            priority = ANDROID_LOG_WARN;
+        else if (_level == LogLevel::Error)
+            priority = ANDROID_LOG_ERROR;
+        else if (_level == LogLevel::Fatal)
+            priority = ANDROID_LOG_FATAL;
+        __android_log_print(priority, "Canis", "%s", _message.c_str());
+#else
         printf("%s%s: \033[0m%s\n", LogColor(_level), LogLevelName(_level), _message.c_str());
+#endif
     }
 
     void RecordLog(LogLevel _level, const LogFormat &_format, va_list _args)

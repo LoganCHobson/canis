@@ -591,12 +591,12 @@ namespace Canis
         uint64_t generation=0;
         uint64_t reloadRevision=0;
         ~MeshRendererCache() {
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
             for(auto& [id,room]:rooms)if(room.query)glDeleteQueries(1,&room.query);
 #endif
         }
         void UpdateRooms(const std::vector<Input>& inputs, const Matrix4& clip) {
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
             const auto revision=AssetManager::GetRenderReloadRevision();
             const bool changed=queryView!=clip || occluders!=inputs || reloadRevision!=revision;
             if(changed) {
@@ -1016,7 +1016,7 @@ namespace Canis
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
-        #if defined(__EMSCRIPTEN__)
+        #if CANIS_GLES
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         #else
@@ -1026,7 +1026,7 @@ namespace Canis
         glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
         #endif
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_shadowDepthTexture, 0);
-        #if defined(__EMSCRIPTEN__)
+        #if CANIS_GLES
         const GLenum drawBuffer = GL_NONE;
         glDrawBuffers(1, &drawBuffer);
         #else
@@ -1119,7 +1119,7 @@ namespace Canis
         const bool cullFaceEnabled = glIsEnabled(GL_CULL_FACE);
         const bool polygonOffsetEnabled = glIsEnabled(GL_POLYGON_OFFSET_FILL);
 
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
         const bool shadingRateEnabled = glewGetExtension("GL_NV_shading_rate_image") && glIsEnabled(GL_SHADING_RATE_IMAGE_NV);
         if (shadingRateEnabled) glDisable(GL_SHADING_RATE_IMAGE_NV);
 #endif
@@ -1225,7 +1225,7 @@ namespace Canis
         glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previousFramebuffer));
         glViewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);
         if (scissorWasEnabled) glEnable(GL_SCISSOR_TEST);
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
         if (shadingRateEnabled) glEnable(GL_SHADING_RATE_IMAGE_NV);
 #endif
     }
@@ -1551,7 +1551,7 @@ namespace Canis
         const int batchTiming=Profiler::Get().Begin("Render batch validation", RenderMetrics::ProfileCategory(),Profiler::Now());
         const char* disableRooms=std::getenv("CANIS_DISABLE_ROOM_CULLING");
         bool roomQueries=false;
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
         roomQueries=!scene->HasEditorCamera3DOverride() && m_shadowShader && m_skyboxVao &&
             (!disableRooms || std::string(disableRooms)!="1") && (GLEW_VERSION_3_3 || GLEW_ARB_occlusion_query2);
 #endif
@@ -2090,7 +2090,7 @@ namespace Canis
         {
             drawStaticBatch(batch);
         }
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
         if(roomQueries) {
             RenderMetrics::Scope timing("Room visibility queries");
             const GLboolean cullEnabled=glIsEnabled(GL_CULL_FACE);

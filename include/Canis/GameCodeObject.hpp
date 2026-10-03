@@ -2,7 +2,7 @@
 
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_timer.h>
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_loadso.h>
 #endif
@@ -13,7 +13,7 @@ namespace Canis
 {
     class App;
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__ANDROID__)
     extern "C"
     {
         void *GameInit(void *_app);
@@ -24,7 +24,7 @@ namespace Canis
 
     struct GameCodeObject
     {
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
         SDL_SharedObject *sharedObjectHandle = nullptr;
         SDL_PathInfo pathInfo = {};
 #endif
@@ -33,7 +33,7 @@ namespace Canis
         void *(*GameInitFunction)(void *) = nullptr;
         void (*GameUpdateFunction)(void *, float, void *) = nullptr;
         void (*GameShutdownFunction)(void *, void *) = nullptr;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
         SDL_PathInfo _lastPathInfo = {};
         Uint64 _lastFileCheck = 0;
 #endif
@@ -44,7 +44,7 @@ namespace Canis
         GameCodeObject gco = {};
         gco.path = _path;
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__ANDROID__)
         gco.GameInitFunction = &GameInit;
         gco.GameUpdateFunction = &GameUpdate;
         gco.GameShutdownFunction = &GameShutdown;
@@ -117,7 +117,7 @@ namespace Canis
 
     static void GameCodeObjectWatchFile(GameCodeObject *_gameCodeObject, Canis::App *_app)
     {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__ANDROID__)
         (void)_gameCodeObject;
         (void)_app;
 #else
@@ -130,7 +130,7 @@ namespace Canis
 
     static void GameCodeObjectDestroy(GameCodeObject *_gameCodeObject)
     {
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
         if (_gameCodeObject != nullptr && _gameCodeObject->sharedObjectHandle != nullptr)
         {
             SDL_UnloadObject(_gameCodeObject->sharedObjectHandle);

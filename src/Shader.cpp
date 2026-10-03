@@ -316,7 +316,7 @@ namespace Canis
             shaderFileCode = versionDirective + shaderFileCode;
         }
 
-#if defined(__EMSCRIPTEN__)
+#if CANIS_GLES
         if (!HasActivePrecisionQualifier(shaderFileCode))
         {
             const size_t firstNewline = shaderFileCode.find('\n');

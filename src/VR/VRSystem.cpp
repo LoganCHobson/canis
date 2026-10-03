@@ -164,7 +164,7 @@ namespace Canis::VR
         glGetIntegerv(GL_VIEWPORT, viewport);
         glGetIntegerv(GL_SCISSOR_BOX, scissor);
         const bool scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
         const bool srgbEnabled = glIsEnabled(GL_FRAMEBUFFER_SRGB);
         glDisable(GL_FRAMEBUFFER_SRGB);
 #endif
@@ -214,7 +214,7 @@ namespace Canis::VR
         glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
         glScissor(scissor[0], scissor[1], scissor[2], scissor[3]);
         if (scissorEnabled) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
         if (srgbEnabled) glEnable(GL_FRAMEBUFFER_SRGB);
 #endif
         m->diagnostics.renderCpuMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();

@@ -61,7 +61,7 @@ namespace Canis::RenderMetrics
     Scope::Scope(const char* name, bool editorOnly):cpu(name,editorOnly || editorDepth ? Profiler::Category::Editor : Profiler::Category::Rendering),editor(editorOnly) {
         start=SDL_GetTicksNS();
         if(editor)++editorDepth;
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
         if(active && issued && (!editorDepth || Profiler::Get().ProfilesEditor())) {
             frame=issued->frame;
             if(issued->result.passes.size()<MaxPasses) {
@@ -78,7 +78,7 @@ namespace Canis::RenderMetrics
     Scope::~Scope() {
         --depth;
         if(editor)--editorDepth;
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
         if(index>=0 && issued && issued->frame==frame) {
             glQueryCounter(issued->passIds[index*2+1],GL_TIMESTAMP);
             issued->result.passes[index].cpuMs=double(SDL_GetTicksNS()-start)/1e6;
@@ -88,7 +88,7 @@ namespace Canis::RenderMetrics
     void BeginFrame() {
         current={};current.id=++nextFrame;current.gpuMs=-1;active=true;shadow=false;issued=nullptr;depth=0;
         start=SDL_GetTicksNS();
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
         if (GLEW_VERSION_3_3 || GLEW_ARB_timer_query) {
             std::vector<PassFrame> completed;
             for (auto& q:queries) if (q.pending) {
@@ -123,7 +123,7 @@ namespace Canis::RenderMetrics
 #endif
     }
     void EndSubmit() {
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
         if (issued) { glQueryCounter(issued->ids[1],GL_TIMESTAMP);issued->pending=true; }
 #endif
         presentStart=SDL_GetTicksNS();current.cpuSubmitMs=double(presentStart-start)/1e6;
@@ -146,7 +146,7 @@ namespace Canis::RenderMetrics
     void ShadowPass(bool enabled) { shadow=enabled; }
     void Shutdown() {
         if(const char* path=std::getenv("CANIS_GPU_PROFILE_OUTPUT"))ExportPasses(path);
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
         for (auto& q:queries) {
             if(q.ids[0])glDeleteQueries(2,q.ids);
             for(size_t i=0;i<MaxPasses;++i)if(q.passIds[i*2])glDeleteQueries(2,&q.passIds[i*2]);

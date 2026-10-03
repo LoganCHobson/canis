@@ -20,7 +20,7 @@ namespace Canis
     {
         m_offscreen = _offscreen;
         // if linux
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
         SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "x11");
 #endif
         // FPS capture should keep the native pointer centered instead of
@@ -32,7 +32,7 @@ namespace Canis
             std::exit(1);
         }
 
-#ifdef __EMSCRIPTEN__
+#if CANIS_GLES
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
         SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
@@ -80,7 +80,7 @@ namespace Canis
         InitGL();
         Debug::Log("Active GPU: %s",reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
 
-#ifdef __EMSCRIPTEN__
+#if CANIS_GLES
         SDL_GL_SetSwapInterval(static_cast<int>(VSYNC));
 #else
         SDL_GL_SetSwapInterval(0);
@@ -319,7 +319,7 @@ namespace Canis
 
     void Window::InitGL()
     {
-#ifdef __EMSCRIPTEN__
+#if CANIS_GLES
 
 #else
         if (!MakeContextCurrent())

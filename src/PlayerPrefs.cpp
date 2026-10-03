@@ -3,6 +3,7 @@
 #include <yaml-cpp/yaml.h>
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -52,9 +53,18 @@ namespace Canis::PlayerPrefs
     float GetFloat(const std::string& key, float fallback)
     {
         const auto text = GetString(key);
+#if defined(__ANDROID__)
+        // The NDK's libc++ has no floating-point std::from_chars.
+        if (text.empty())
+            return fallback;
+        char* end = nullptr;
+        const float value = std::strtof(text.c_str(), &end);
+        return end == text.c_str() + text.size() && std::isfinite(value) ? value : fallback;
+#else
         float value;
         const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
         return result.ec == std::errc{} && result.ptr == text.data() + text.size() && std::isfinite(value) ? value : fallback;
+#endif
     }
     bool GetBool(const std::string& key, bool fallback)
     {

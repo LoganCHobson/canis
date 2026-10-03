@@ -1,7 +1,7 @@
 # Valve Steam Audio C SDK, pinned for reproducible builds. SDL remains the audio device backend.
 option(CANIS_ENABLE_STEAM_AUDIO "Use Steam Audio HRTF spatialization" ON)
 set(CANIS_STEAM_AUDIO_ROOT "" CACHE PATH "Existing extracted Steam Audio SDK (contains include/phonon.h)")
-if(CANIS_PLATFORM_WEB)
+if(CANIS_PLATFORM_WEB OR CANIS_PLATFORM_ANDROID)
     set(CANIS_ENABLE_STEAM_AUDIO OFF)
 endif()
 if(CANIS_ENABLE_STEAM_AUDIO)

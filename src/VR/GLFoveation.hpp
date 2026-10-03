@@ -9,7 +9,7 @@ namespace Canis::VR
     // desktop GL. Destruction occurs while the owning GL context is current.
     class GLFoveation
     {
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
         GLuint texture = 0;
         GLint columns = 0, rows = 0, oldBinding = 0;
         GLenum oldPalette[3]{};
@@ -19,7 +19,7 @@ namespace Canis::VR
         ~GLFoveation() { Reset(); }
         void Reset()
         {
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
             End();
             if (texture) glDeleteTextures(1, &texture);
             texture = 0; columns = rows = 0;
@@ -27,7 +27,7 @@ namespace Canis::VR
         }
         bool Supported() const
         {
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
             // Experimental GLEW can resolve entry points even when the driver
             // does not advertise the extension (for example Mesa on AMD).
             return glewGetExtension("GL_NV_shading_rate_image") && glBindShadingRateImageNV &&
@@ -38,7 +38,7 @@ namespace Canis::VR
         }
         bool Begin(int width, int height, Vector2 center)
         {
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
             if (!Supported()) return false;
             GLint tileWidth = 0, tileHeight = 0, paletteSize = 0;
             glGetIntegerv(GL_SHADING_RATE_IMAGE_TEXEL_WIDTH_NV, &tileWidth);
@@ -82,7 +82,7 @@ namespace Canis::VR
         }
         void End()
         {
-#ifndef __EMSCRIPTEN__
+#if !CANIS_GLES
             if (!active) return;
             glBindShadingRateImageNV(oldBinding);
             glShadingRateImagePaletteNV(0, 0, 3, oldPalette);

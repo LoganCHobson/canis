@@ -9,7 +9,9 @@
 #include <algorithm>
 #include <charconv>
 #include <cstdint>
+#include <cstdlib>
 #include <sstream>
+#include <type_traits>
 #include <utility>
 
 namespace Canis
@@ -64,8 +66,20 @@ namespace Canis
         T ParseNumber(const std::string &_text, T _fallback)
         {
             T value = _fallback;
-            std::from_chars(_text.data(), _text.data() + _text.size(), value);
-            return value;
+#if defined(__ANDROID__)
+            // The NDK's libc++ has no floating-point std::from_chars.
+            if constexpr (std::is_floating_point_v<T>)
+            {
+                char *end = nullptr;
+                const double parsed = std::strtod(_text.c_str(), &end);
+                return end != _text.c_str() ? static_cast<T>(parsed) : _fallback;
+            }
+            else
+#endif
+            {
+                std::from_chars(_text.data(), _text.data() + _text.size(), value);
+                return value;
+            }
         }
 
         std::string FormatFloat(float _value)
