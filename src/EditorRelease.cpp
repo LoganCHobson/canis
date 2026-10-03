@@ -1,4 +1,5 @@
 #include <Canis/EditorRelease.hpp>
+#include <Canis/Canis.hpp>
 #include <SDL3/SDL.h>
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -58,7 +59,8 @@ namespace Canis
             m_error = "Choose a startup scene and a new or empty build folder.";
             return;
         }
-        static const char* platforms[] = {"desktop", "web", "desktop-vr", "vr"};
+        static const char* platforms[] = {"desktop", "web", "desktop-vr", "vr", "android"};
+        const bool android = m_platform == 4;
         const auto job = m_root / "build/editor-release/logs";
         std::error_code error;
         fs::create_directories(job, error);
@@ -76,8 +78,13 @@ namespace Canis
             "--project", m_project.string(),
             "--platform", platforms[m_platform], "--output", m_folder, "--scene", m_scene,
             "--jobs", std::to_string(std::clamp(m_jobs, 1, 64)),
-            m_csharp ? "--csharp" : "--no-csharp",
-            m_steamAudio ? "--steam-audio" : "--no-steam-audio"};
+            m_csharp && !android ? "--csharp" : "--no-csharp",
+            m_steamAudio && m_platform != 1 && !android ? "--steam-audio" : "--no-steam-audio"};
+        if (android)
+        {
+            storage.emplace_back("--android-format");
+            storage.emplace_back(m_androidFormat == 1 ? "bundle" : "apk");
+        }
         if (m_development) storage.emplace_back("--development");
         std::vector<const char*> args;
         for (const auto& argument : storage) args.push_back(argument.c_str());
@@ -89,7 +96,18 @@ namespace Canis
         SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_REDIRECT);
         SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_POINTER, log);
         SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_TO_STDOUT_BOOLEAN, true);
+        // Signing passwords reach Gradle through the environment, never the command line or log.
+        SDL_Environment* environment = SDL_CreateEnvironment(true);
+        if (android && environment)
+        {
+            if (!m_keystorePassword.empty())
+                SDL_SetEnvironmentVariable(environment, "CANIS_KEYSTORE_PASSWORD", m_keystorePassword.c_str(), true);
+            if (!m_keyPassword.empty())
+                SDL_SetEnvironmentVariable(environment, "CANIS_KEY_PASSWORD", m_keyPassword.c_str(), true);
+            SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, environment);
+        }
         m_process = SDL_CreateProcessWithProperties(props);
+        if (environment) SDL_DestroyEnvironment(environment);
         if (!m_process) m_error = std::string("Unable to start Python 3: ") + SDL_GetError();
         else m_builtFolder = m_folder;
         SDL_DestroyProperties(props);
@@ -139,13 +157,37 @@ namespace Canis
         const bool running = m_process != nullptr;
         ImGui::BeginDisabled(running || pickerActive);
         ImGui::SetNextItemWidth(260);
-        ImGui::Combo("Platform", &m_platform, "Desktop\0Web\0Desktop VR\0VR\0");
+        static const char* folderNames[] = {"Desktop", "Web", "DesktopVR", "VR", "Android"};
+        const int previousPlatform = m_platform;
+        if (ImGui::Combo("Platform", &m_platform, "Desktop\0Web\0Desktop VR\0VR\0Android\0") &&
+            m_folder == (m_root / "Builds" / folderNames[previousPlatform]).string())
+        {
+            // Follow the platform while the folder is still the default.
+            m_folder = (m_root / "Builds" / folderNames[m_platform]).string();
+        }
         const char* descriptions[] = {
             "Desktop player for this computer's OS and architecture.",
             "Browser player: HTML, WebAssembly, data and managed runtime. Requires Emscripten; C# also needs .NET wasm-tools.",
             "PC OpenXR player. Starts in headset mode; requires an OpenXR loader and active headset runtime.",
-            "Standalone Meta Quest / Android. Unavailable: Canis needs an Android lifecycle, OpenXR GLES/Vulkan backend and ARM64 C# host."};
+            "Standalone Meta Quest / Android VR. Unavailable: Canis needs an OpenXR GLES/Vulkan backend and ARM64 C# host.",
+            "Android phones and tablets: an APK to install, or an App Bundle for Google Play. Uses Project Settings > Android. Requires the Android SDK and NDK; see canis/docs/android-build.md."};
         ImGui::TextWrapped("%s", descriptions[m_platform]);
+        const bool android = m_platform == 4;
+        if (android)
+        {
+            ImGui::RadioButton("APK", &m_androidFormat, 0);
+            ImGui::SameLine();
+            ImGui::RadioButton("App Bundle (Google Play)", &m_androidFormat, 1);
+            if (!GetProjectConfig().androidKeystorePath.empty())
+            {
+                ImGui::SetNextItemWidth(220);
+                ImGui::InputText("Keystore password", &m_keystorePassword, ImGuiInputTextFlags_Password);
+                ImGui::SetNextItemWidth(220);
+                ImGui::InputText("Key password (if different)", &m_keyPassword, ImGuiInputTextFlags_Password);
+            }
+            else
+                ImGui::TextWrapped("No keystore set in Project Settings > Android, so release builds are unsigned.");
+        }
         ImGui::Spacing();
         ImGui::SetNextItemWidth(-145);
         ImGui::InputText("Startup scene", &m_scene);
@@ -162,8 +204,10 @@ namespace Canis
             ImGui::EndCombo();
         }
         ImGui::Checkbox("Development build (native debug symbols)", &m_development);
+        ImGui::BeginDisabled(android);
         ImGui::Checkbox("C# scripting (precompile saved scripts)", &m_csharp);
-        ImGui::BeginDisabled(m_platform == 1);
+        ImGui::EndDisabled();
+        ImGui::BeginDisabled(m_platform == 1 || android);
         ImGui::Checkbox("Steam Audio spatial sound (desktop only)", &m_steamAudio);
         ImGui::EndDisabled();
         ImGui::SetNextItemWidth(110);

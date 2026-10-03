@@ -22,6 +22,15 @@ namespace Canis
         PROJECT_WINDOW_FULLSCREEN = 2,
     };
 
+    enum ProjectOrientation : int
+    {
+        PROJECT_ORIENTATION_AUTO = 0,
+        PROJECT_ORIENTATION_PORTRAIT = 1,
+        PROJECT_ORIENTATION_LANDSCAPE = 2,
+        PROJECT_ORIENTATION_SENSOR_PORTRAIT = 3,
+        PROJECT_ORIENTATION_SENSOR_LANDSCAPE = 4,
+    };
+
     enum EditorThemeMode : int
     {
         EDITOR_THEME_DARK = 0,
@@ -81,6 +90,24 @@ namespace Canis
         int windowMode = PROJECT_WINDOW_WINDOWED;
         bool windowResizable = true;
         bool windowStartMaximized = false;
+
+        // Android player settings, read by project/android/app/build.gradle.
+        // An empty package name builds as org.canis.<executableName>.
+        std::string androidPackageName = "";
+        std::string androidVersionName = "1.0";
+        int androidVersionCode = 1;
+        int androidOrientation = PROJECT_ORIENTATION_AUTO;
+        int androidMinSdk = 21;
+        // A zero icon falls back to iconUUID. The adaptive layers are optional
+        // and used on Android 8+; without a background image the color is used.
+        UUID androidIconUUID = UUID(0);
+        UUID androidIconForegroundUUID = UUID(0);
+        UUID androidIconBackgroundUUID = UUID(0);
+        std::string androidIconBackgroundColor = "#FFFFFF";
+        // Release signing. Passwords are never stored; the build reads them
+        // from CANIS_KEYSTORE_PASSWORD and CANIS_KEY_PASSWORD.
+        std::string androidKeystorePath = "";
+        std::string androidKeyAlias = "";
     };
 
     struct EditorSceneCameraConfig
@@ -121,6 +148,8 @@ namespace Canis
 
     ProjectConfig& GetProjectConfig();
     bool IsValidProjectExecutableName(const std::string &_name);
+    bool IsValidAndroidPackageName(const std::string &_name);
+    bool IsValidHexColor(const std::string &_color);
     EditorConfig& GetEditorConfig();
     bool IsEditorRuntimeEnabled();
     void SetEditorRuntimeEnabled(bool _enabled);

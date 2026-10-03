@@ -44,6 +44,24 @@ namespace Canis
             return PROJECT_WINDOW_WINDOWED;
         }
 
+        int NormalizeProjectOrientation(int _value)
+        {
+            if (_value >= PROJECT_ORIENTATION_AUTO && _value <= PROJECT_ORIENTATION_SENSOR_LANDSCAPE)
+                return _value;
+
+            return PROJECT_ORIENTATION_AUTO;
+        }
+
+        bool IsAsciiLetter(char _character)
+        {
+            return (_character >= 'a' && _character <= 'z') || (_character >= 'A' && _character <= 'Z');
+        }
+
+        bool IsAsciiDigit(char _character)
+        {
+            return _character >= '0' && _character <= '9';
+        }
+
         int NormalizeEditorThemeMode(int _value)
         {
             if (_value == EDITOR_THEME_DARK || _value == EDITOR_THEME_LIGHT)
@@ -266,6 +284,41 @@ namespace Canis
         });
     }
 
+    bool IsValidAndroidPackageName(const std::string &_name)
+    {
+        // Two or more dot-separated segments, each a Java identifier.
+        int segments = 0;
+        std::size_t start = 0;
+        while (start <= _name.size())
+        {
+            const std::size_t end = std::min(_name.find('.', start), _name.size());
+            const std::string segment = _name.substr(start, end - start);
+            if (segment.empty() || !IsAsciiLetter(segment[0]))
+                return false;
+            for (const char character : segment)
+            {
+                if (!IsAsciiLetter(character) && !IsAsciiDigit(character) && character != '_')
+                    return false;
+            }
+            segments++;
+            start = end + 1;
+        }
+        return segments >= 2;
+    }
+
+    bool IsValidHexColor(const std::string &_color)
+    {
+        if (_color.size() != 7 || _color[0] != '#')
+            return false;
+
+        return std::all_of(_color.begin() + 1, _color.end(), [](char _character)
+        {
+            return IsAsciiDigit(_character) ||
+                   (_character >= 'a' && _character <= 'f') ||
+                   (_character >= 'A' && _character <= 'F');
+        });
+    }
+
     bool SaveProjectConfig()
     {
         ProjectConfig projectConfig = GetProjectConfig();
@@ -273,6 +326,18 @@ namespace Canis
         if (!IsValidProjectExecutableName(projectConfig.executableName))
         {
             Debug::Error("Executable name must contain only letters, numbers, _, ., +, or -.");
+            return false;
+        }
+
+        if (!projectConfig.androidPackageName.empty() && !IsValidAndroidPackageName(projectConfig.androidPackageName))
+        {
+            Debug::Error("Android package name must look like com.company.game.");
+            return false;
+        }
+
+        if (!IsValidHexColor(projectConfig.androidIconBackgroundColor))
+        {
+            Debug::Error("Android icon background color must look like #RRGGBB.");
             return false;
         }
 
@@ -318,6 +383,17 @@ namespace Canis
         node["windowMode"] = NormalizeProjectWindowMode(projectConfig.windowMode);
         node["windowResizable"] = projectConfig.windowResizable;
         node["windowStartMaximized"] = projectConfig.windowStartMaximized;
+        node["androidPackageName"] = projectConfig.androidPackageName;
+        node["androidVersionName"] = projectConfig.androidVersionName;
+        node["androidVersionCode"] = projectConfig.androidVersionCode;
+        node["androidOrientation"] = NormalizeProjectOrientation(projectConfig.androidOrientation);
+        node["androidMinSdk"] = projectConfig.androidMinSdk;
+        node["androidIconUUID"] = std::to_string(projectConfig.androidIconUUID);
+        node["androidIconForegroundUUID"] = std::to_string(projectConfig.androidIconForegroundUUID);
+        node["androidIconBackgroundUUID"] = std::to_string(projectConfig.androidIconBackgroundUUID);
+        node["androidIconBackgroundColor"] = projectConfig.androidIconBackgroundColor;
+        node["androidKeystorePath"] = projectConfig.androidKeystorePath;
+        node["androidKeyAlias"] = projectConfig.androidKeyAlias;
 
         const fs::path runtimeConfigPath = kProjectConfigPath;
         if (!WriteProjectConfigNode(runtimeConfigPath, node))
@@ -363,6 +439,14 @@ namespace Canis
                 sourceNode["gpuPreference"] = NormalizeGpuPreference(projectConfig.gpuPreference);
                 sourceNode["windowResizable"] = projectConfig.windowResizable;
                 sourceNode["windowStartMaximized"] = projectConfig.windowStartMaximized;
+                // Platform builds read the icon, start scene and player
+                // settings from the source copy.
+                sourceNode["iconUUID"] = std::to_string(projectConfig.iconUUID);
+                sourceNode["launchScene"] = projectConfig.launchScene;
+                for (const char *key : {"androidPackageName", "androidVersionName", "androidVersionCode",
+                         "androidOrientation", "androidMinSdk", "androidIconUUID", "androidIconForegroundUUID",
+                         "androidIconBackgroundUUID", "androidIconBackgroundColor", "androidKeystorePath", "androidKeyAlias"})
+                    sourceNode[key] = node[key];
                 if (!WriteProjectConfigNode(sourceConfigPath, sourceNode))
                     return false;
             }
@@ -484,6 +568,19 @@ namespace Canis
         projectConfig.windowResizable = node["windowResizable"].as<bool>(
             node["resizeable"].as<bool>(projectConfig.windowResizable));
         projectConfig.windowStartMaximized = node["windowStartMaximized"].as<bool>(projectConfig.windowStartMaximized);
+        projectConfig.androidPackageName = node["androidPackageName"].as<std::string>(projectConfig.androidPackageName);
+        projectConfig.androidVersionName = node["androidVersionName"].as<std::string>(projectConfig.androidVersionName);
+        projectConfig.androidVersionCode = std::max(1, node["androidVersionCode"].as<int>(projectConfig.androidVersionCode));
+        projectConfig.androidOrientation = NormalizeProjectOrientation(node["androidOrientation"].as<int>(projectConfig.androidOrientation));
+        projectConfig.androidMinSdk = std::max(21, node["androidMinSdk"].as<int>(projectConfig.androidMinSdk));
+        projectConfig.androidIconUUID = node["androidIconUUID"].as<uint64_t>(projectConfig.androidIconUUID);
+        projectConfig.androidIconForegroundUUID = node["androidIconForegroundUUID"].as<uint64_t>(projectConfig.androidIconForegroundUUID);
+        projectConfig.androidIconBackgroundUUID = node["androidIconBackgroundUUID"].as<uint64_t>(projectConfig.androidIconBackgroundUUID);
+        projectConfig.androidIconBackgroundColor = node["androidIconBackgroundColor"].as<std::string>(projectConfig.androidIconBackgroundColor);
+        if (!IsValidHexColor(projectConfig.androidIconBackgroundColor))
+            projectConfig.androidIconBackgroundColor = "#FFFFFF";
+        projectConfig.androidKeystorePath = node["androidKeystorePath"].as<std::string>(projectConfig.androidKeystorePath);
+        projectConfig.androidKeyAlias = node["androidKeyAlias"].as<std::string>(projectConfig.androidKeyAlias);
 
         SetEditorRuntimeEnabled(projectConfig.editor);
 

@@ -18245,7 +18245,143 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
             ImGui::EndDragDropTarget();
         }
 
+        if (ImGui::CollapsingHeader("Android"))
+            DrawAndroidProjectSettings();
+
         ImGui::End();
+    }
+
+    void Editor::DrawAndroidProjectSettings()
+    {
+        ProjectConfig &projectConfig = Canis::GetProjectConfig();
+
+        ImGui::TextDisabled("Read by project/android when building the app.");
+
+        ImGui::Text("package name");
+        ImGui::SameLine();
+        const std::string defaultPackage = "org.canis." + projectConfig.executableName;
+        if (ImGui::InputTextWithHint("##androidPackageName", defaultPackage.c_str(), &projectConfig.androidPackageName) &&
+            (projectConfig.androidPackageName.empty() || Canis::IsValidAndroidPackageName(projectConfig.androidPackageName)))
+        {
+            Canis::SaveProjectConfig();
+        }
+        if (!projectConfig.androidPackageName.empty() && !Canis::IsValidAndroidPackageName(projectConfig.androidPackageName))
+            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Use segments like com.company.game.");
+        else
+            ImGui::TextDisabled("Google Play identity. It cannot change after the first upload.");
+
+        ImGui::Text("version");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(120.0f);
+        if (ImGui::InputText("##androidVersionName", &projectConfig.androidVersionName))
+            Canis::SaveProjectConfig();
+        ImGui::SameLine();
+        ImGui::Text("code");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(120.0f);
+        if (ImGui::InputInt("##androidVersionCode", &projectConfig.androidVersionCode))
+        {
+            projectConfig.androidVersionCode = std::max(1, projectConfig.androidVersionCode);
+            Canis::SaveProjectConfig();
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Must increase with every Google Play upload.");
+
+        static const char *orientationLabels[] = {
+            "Auto rotation", "Portrait", "Landscape", "Portrait (either way up)", "Landscape (either way up)"};
+        ImGui::Text("orientation");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(200.0f);
+        if (ImGui::Combo("##androidOrientation", &projectConfig.androidOrientation, orientationLabels, IM_ARRAYSIZE(orientationLabels)))
+            Canis::SaveProjectConfig();
+
+        ImGui::Text("min Android API");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(120.0f);
+        if (ImGui::InputInt("##androidMinSdk", &projectConfig.androidMinSdk))
+        {
+            projectConfig.androidMinSdk = std::clamp(projectConfig.androidMinSdk, 21, 35);
+            Canis::SaveProjectConfig();
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("21 is Android 5.0. OpenGL ES 3 devices run 18 and up.");
+
+        // Texture slots take a dragged texture asset, like the project icon.
+        auto drawTextureSlot = [&](const char *_label, const char *_id, UUID &_uuid, const char *_emptyText)
+        {
+            ImGui::PushID(_id);
+            ImGui::Text("%s", _label);
+            ImGui::SameLine();
+            const MetaFileAsset *meta = _uuid == UUID(0) ? nullptr : AssetManager::GetMetaFile(AssetManager::GetPath(_uuid));
+            ImGui::Button(meta != nullptr ? meta->name.c_str() : _emptyText, ImVec2(150, 0));
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("ASSET_DRAG"))
+                {
+                    const AssetDragData dropped = *static_cast<const AssetDragData *>(payload->Data);
+                    if (AssetManager::GetTexture(AssetManager::GetPath(dropped.uuid)) != nullptr)
+                    {
+                        _uuid = dropped.uuid;
+                        Canis::SaveProjectConfig();
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+            if (_uuid != UUID(0))
+            {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Clear"))
+                {
+                    _uuid = UUID(0);
+                    Canis::SaveProjectConfig();
+                }
+            }
+            ImGui::PopID();
+        };
+
+        ImGui::SeparatorText("Icons");
+        ImGui::TextWrapped("Use square PNGs, 512px or larger. Every launcher size is scaled from them at build time.");
+        drawTextureSlot("icon", "androidIcon", projectConfig.androidIconUUID, "(project icon)");
+        ImGui::TextWrapped("Adaptive icons (Android 8+) let the launcher crop the icon to its own shape. "
+            "Keep the artwork inside the centre 66% of the foreground.");
+        drawTextureSlot("foreground", "androidIconForeground", projectConfig.androidIconForegroundUUID, "(none)");
+        drawTextureSlot("background", "androidIconBackground", projectConfig.androidIconBackgroundUUID, "(color)");
+
+        if (projectConfig.androidIconBackgroundUUID == UUID(0))
+        {
+            float color[3] = {1.0f, 1.0f, 1.0f};
+            unsigned int rgb = 0xFFFFFF;
+            if (Canis::IsValidHexColor(projectConfig.androidIconBackgroundColor))
+                rgb = static_cast<unsigned int>(std::stoul(projectConfig.androidIconBackgroundColor.substr(1), nullptr, 16));
+            color[0] = ((rgb >> 16) & 0xFF) / 255.0f;
+            color[1] = ((rgb >> 8) & 0xFF) / 255.0f;
+            color[2] = (rgb & 0xFF) / 255.0f;
+            ImGui::Text("background color");
+            ImGui::SameLine();
+            if (ImGui::ColorEdit3("##androidIconBackgroundColor", color, ImGuiColorEditFlags_NoInputs))
+            {
+                char hex[8];
+                std::snprintf(hex, sizeof(hex), "#%02X%02X%02X",
+                    static_cast<int>(std::round(color[0] * 255.0f)),
+                    static_cast<int>(std::round(color[1] * 255.0f)),
+                    static_cast<int>(std::round(color[2] * 255.0f)));
+                projectConfig.androidIconBackgroundColor = hex;
+                Canis::SaveProjectConfig();
+            }
+        }
+
+        ImGui::SeparatorText("Release signing");
+        ImGui::Text("keystore");
+        ImGui::SameLine();
+        if (ImGui::InputTextWithHint("##androidKeystorePath", "path from the project root", &projectConfig.androidKeystorePath))
+            Canis::SaveProjectConfig();
+        ImGui::Text("key alias");
+        ImGui::SameLine();
+        if (ImGui::InputText("##androidKeyAlias", &projectConfig.androidKeyAlias))
+            Canis::SaveProjectConfig();
+        ImGui::TextWrapped("Passwords are never saved. The Release window asks for them, or set "
+            "CANIS_KEYSTORE_PASSWORD and CANIS_KEY_PASSWORD. Keep the keystore out of version control; "
+            "losing it means you can no longer update the app.");
     }
 
     void Editor::FinalizeReloadBuildIfReady()

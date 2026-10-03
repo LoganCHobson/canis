@@ -39,6 +39,8 @@ For a Google Play bundle:
 ./scripts/build-android.sh android-bundle
 ```
 
+These builds use the project as it is on disk. The editor's Release window also lets you choose the startup scene; see Release builds below.
+
 On Windows, run the script from Git Bash.
 
 ## Output
@@ -55,17 +57,30 @@ Install a debug build on a connected device:
 adb install -r project/android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Project identity
+## Project settings
 
-The launcher label comes from `gameName` in `project_settings/project.canis`. Set the package name and version in `project/android/gradle.properties`:
+Android player settings live in `project_settings/project.canis` and are edited in the editor under **Project Settings > Android**:
 
-```properties
-canisApplicationId=com.example.mygame
-canisVersionCode=1
-canisVersionName=1.0
+- package name (empty builds as `org.canis.<executableName>`)
+- version name and version code (the code must increase with every Google Play upload)
+- orientation and minimum Android API
+- icons: an app icon (falls back to the project icon) and optional adaptive icon foreground and background layers with a background color
+
+Icons are square PNG texture assets, 512px or larger. Every launcher density, the adaptive icon and a 512px `play-store-icon.png` are generated from them at build time.
+
+Any `android*` key can be overridden for one build with a Gradle property, for example `-PandroidVersionCode=42`.
+
+## Release builds
+
+The editor's **Release** window has an **Android** platform that builds an APK or an App Bundle for Google Play through `scripts/build-release.py`, the same script the other platforms use.
+
+Release builds are signed when **Project Settings > Android** names a keystore and key alias. Passwords are never saved: the Release window asks for them, or set `CANIS_KEYSTORE_PASSWORD` and `CANIS_KEY_PASSWORD` when running Gradle directly. Create a keystore once with the JDK's `keytool`:
+
+```bash
+keytool -genkeypair -v -keystore release.keystore -alias game -keyalg RSA -keysize 2048 -validity 10000
 ```
 
-Release builds and bundles must be signed before they can be installed or uploaded.
+Keep the keystore out of version control and backed up; losing it means the app can no longer be updated.
 
 ## Notes
 

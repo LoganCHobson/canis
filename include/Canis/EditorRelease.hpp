@@ -40,7 +40,11 @@ namespace Canis
         std::string m_output;
         std::string m_error;
         std::string m_builtFolder;
+        // Android signing passwords live only in memory for this session.
+        std::string m_keystorePassword;
+        std::string m_keyPassword;
         int m_platform = 0;
+        int m_androidFormat = 0; // 0 APK, 1 App Bundle
         int m_jobs = 8;
         bool m_development = false;
         bool m_csharp = true;

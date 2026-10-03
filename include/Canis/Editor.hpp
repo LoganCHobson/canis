@@ -342,6 +342,7 @@ namespace Canis
         void ClearRememberedAnimationClipAssetPathIfMatches(const std::string &_path);
         void DrawShaderGraphWindow();
         void DrawProjectSettings();
+        void DrawAndroidProjectSettings();
         void DrawSystemPanel();
         void DrawConsolePanel();
         void DrawEditorPanel();
