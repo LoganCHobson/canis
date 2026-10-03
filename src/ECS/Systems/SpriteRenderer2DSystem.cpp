@@ -543,7 +543,10 @@ namespace Canis
         
         glEnable(GL_DEPTH_TEST);
         glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        // Blend color as usual but keep the framebuffer opaque: Android
+        // surfaces and web canvases composite with its alpha, so translucent
+        // sprites would otherwise show what is behind the window.
+        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         glDepthFunc(GL_LESS);
 
         bool cameraFound = false;
