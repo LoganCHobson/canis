@@ -19,6 +19,7 @@
 
 #include <Canis/Canis.hpp>
 #include <Canis/GameCodeObject.hpp>
+#include <Canis/Haptics.hpp>
 #include <Canis/Time.hpp>
 #include <Canis/Debug.hpp>
 #include <Canis/OpenGL.hpp>
@@ -2853,6 +2854,7 @@ namespace Canis
         m_editor = nullptr;
         runtime->inputManager.reset();
         SteamInputPlatform::Shutdown();
+        Haptics::Shutdown();
         delete runtime;
     }
 

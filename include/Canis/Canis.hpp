@@ -108,6 +108,10 @@ namespace Canis
         // from CANIS_KEYSTORE_PASSWORD and CANIS_KEY_PASSWORD.
         std::string androidKeystorePath = "";
         std::string androidKeyAlias = "";
+        // https links the app opens directly (Android App Links), e.g. host
+        // "example.github.io" and path "/game/daily". Empty disables them.
+        std::string androidLinkHost = "";
+        std::string androidLinkPath = "";
     };
 
     struct EditorSceneCameraConfig

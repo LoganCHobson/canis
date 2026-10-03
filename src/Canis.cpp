@@ -394,6 +394,8 @@ namespace Canis
         node["androidIconBackgroundColor"] = projectConfig.androidIconBackgroundColor;
         node["androidKeystorePath"] = projectConfig.androidKeystorePath;
         node["androidKeyAlias"] = projectConfig.androidKeyAlias;
+        node["androidLinkHost"] = projectConfig.androidLinkHost;
+        node["androidLinkPath"] = projectConfig.androidLinkPath;
 
         const fs::path runtimeConfigPath = kProjectConfigPath;
         if (!WriteProjectConfigNode(runtimeConfigPath, node))
@@ -445,7 +447,8 @@ namespace Canis
                 sourceNode["launchScene"] = projectConfig.launchScene;
                 for (const char *key : {"androidPackageName", "androidVersionName", "androidVersionCode",
                          "androidOrientation", "androidMinSdk", "androidIconUUID", "androidIconForegroundUUID",
-                         "androidIconBackgroundUUID", "androidIconBackgroundColor", "androidKeystorePath", "androidKeyAlias"})
+                         "androidIconBackgroundUUID", "androidIconBackgroundColor", "androidKeystorePath", "androidKeyAlias",
+                         "androidLinkHost", "androidLinkPath"})
                     sourceNode[key] = node[key];
                 if (!WriteProjectConfigNode(sourceConfigPath, sourceNode))
                     return false;
@@ -581,6 +584,8 @@ namespace Canis
             projectConfig.androidIconBackgroundColor = "#FFFFFF";
         projectConfig.androidKeystorePath = node["androidKeystorePath"].as<std::string>(projectConfig.androidKeystorePath);
         projectConfig.androidKeyAlias = node["androidKeyAlias"].as<std::string>(projectConfig.androidKeyAlias);
+        projectConfig.androidLinkHost = node["androidLinkHost"].as<std::string>(projectConfig.androidLinkHost);
+        projectConfig.androidLinkPath = node["androidLinkPath"].as<std::string>(projectConfig.androidLinkPath);
 
         SetEditorRuntimeEnabled(projectConfig.editor);
 

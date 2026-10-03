@@ -18370,6 +18370,18 @@ DockSpace         ID=0x49B9F6FE Window=0x1C358F53 Pos=0,44 Size=1280,676 Split=X
             }
         }
 
+        ImGui::SeparatorText("Links");
+        ImGui::TextWrapped("https links that open the app directly (Android App Links). The site must host "
+            "/.well-known/assetlinks.json with this app's signing fingerprint.");
+        ImGui::Text("host");
+        ImGui::SameLine();
+        if (ImGui::InputTextWithHint("##androidLinkHost", "example.github.io", &projectConfig.androidLinkHost))
+            Canis::SaveProjectConfig();
+        ImGui::Text("path");
+        ImGui::SameLine();
+        if (ImGui::InputTextWithHint("##androidLinkPath", "/game/daily", &projectConfig.androidLinkPath))
+            Canis::SaveProjectConfig();
+
         ImGui::SeparatorText("Release signing");
         ImGui::Text("keystore");
         ImGui::SameLine();
